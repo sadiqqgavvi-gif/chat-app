@@ -125,7 +125,7 @@ function Header() {
         <button
           type="button"
           onClick={openSettings}
-          className="flex max-w-[11rem] items-center gap-2 rounded-full px-2 py-1.5 text-gray-700 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="flex max-w-44 items-center gap-2 rounded-full px-2 py-1.5 text-gray-700 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
           title="Profile and settings"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700 dark:bg-slate-700 dark:text-slate-200">

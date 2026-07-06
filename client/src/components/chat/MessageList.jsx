@@ -550,7 +550,7 @@ function MessageList() {
                 <>
                   {(isDeleted || message.content) && (
                     <p
-                      className={`break-words text-sm leading-relaxed ${
+                      className={`wrap-break-word text-sm leading-relaxed ${
                         isDeleted ? "italic text-gray-400" : ""
                       }`}
                     >
