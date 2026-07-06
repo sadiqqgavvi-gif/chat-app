@@ -450,16 +450,16 @@ function MessageList() {
 
   if (!selectedChat) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-900 text-gray-400">
+      <div className="flex-1 flex items-center justify-center bg-gray-900 text-gray-400 dark:bg-slate-950 dark:text-slate-500">
         Select a chat to start messaging
       </div>
     );
   }
 
   return (
-    <div className="relative flex-1 overflow-y-auto bg-gray-900 p-5 text-left">
+    <div className="relative flex-1 overflow-y-auto bg-gray-900 p-5 text-left dark:bg-slate-950">
       {actionError && (
-        <div className="sticky top-0 z-20 mx-auto mb-4 max-w-md rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 shadow">
+        <div className="sticky top-0 z-20 mx-auto mb-4 max-w-md rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 shadow dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
           {actionError}
         </div>
       )}
@@ -481,7 +481,7 @@ function MessageList() {
               className={`max-w-[min(24rem,80%)] rounded-2xl px-4 py-2 shadow-sm ${
                 isOwnMessage
                   ? "rounded-br-md bg-blue-600 text-white"
-                  : "rounded-bl-md bg-gray-200 text-gray-950"
+                  : "rounded-bl-md bg-gray-200 text-gray-950 dark:bg-slate-800 dark:text-slate-100"
               }`}
             >
               {message.replyTo && !isDeleted && (
@@ -489,7 +489,7 @@ function MessageList() {
                   className={`mb-2 rounded-md border-l-4 px-3 py-2 text-xs ${
                     isOwnMessage
                       ? "border-white/70 bg-white/15 text-white"
-                      : "border-blue-500 bg-white/80 text-gray-700"
+                      : "border-blue-500 bg-white/80 text-gray-700 dark:bg-slate-900 dark:text-slate-200"
                   }`}
                 >
                   <div className="font-semibold">
@@ -550,7 +550,7 @@ function MessageList() {
                 <>
                   {(isDeleted || message.content) && (
                     <p
-                      className={`wrap-break-word text-sm leading-relaxed ${
+                      className={`break-words text-sm leading-relaxed ${
                         isDeleted ? "italic text-gray-400" : ""
                       }`}
                     >
@@ -595,7 +595,7 @@ function MessageList() {
                             className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
                               isOwnMessage
                                 ? "bg-white/15 hover:bg-white/25"
-                                : "bg-white hover:bg-gray-50"
+                                : "bg-white hover:bg-gray-50 dark:bg-slate-700 dark:hover:bg-slate-600"
                             }`}
                           >
                             <FiDownload className="shrink-0" />
@@ -656,7 +656,7 @@ function MessageList() {
 
       {menu.visible && (
         <div
-          className="fixed z-50 w-55 overflow-hidden rounded-md border border-gray-200 bg-white py-2 text-sm text-gray-800 shadow-xl"
+          className="fixed z-50 w-55 overflow-hidden rounded-md border border-gray-200 bg-white py-2 text-sm text-gray-800 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
           style={{
             left: menu.x,
             top: menu.y,
@@ -672,7 +672,7 @@ function MessageList() {
                 key={action.label}
                 type="button"
                 onClick={action.onClick}
-                className={`flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 ${
+                className={`flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 dark:hover:bg-slate-800 ${
                   action.danger ? "text-red-600" : ""
                 }`}
                 role="menuitem"

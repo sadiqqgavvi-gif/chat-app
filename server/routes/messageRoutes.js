@@ -10,6 +10,7 @@ const {
   deleteMessageForMe,
   deleteMessageForEveryone,
   editMessage,
+  clearChat,
 } = require("../controllers/messageController");
 
 router.post("/", protect, sendMessage);
@@ -31,5 +32,7 @@ router.put(
   protect,
   editMessage
 );
+
+router.put("/clear/:chatId", protect, clearChat);
 
 module.exports = router;

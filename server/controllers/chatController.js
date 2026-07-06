@@ -71,14 +71,25 @@ const getChats = async (req, res) => {
 
     const formattedChats = await Promise.all(
       chats.map(async (chat) => {
-        const unreadCount = await Message.countDocuments({
-          chat: chat._id,
-          sender: { $ne: req.user._id },
-          read: false,
-        });
+        const [unreadCount, latestVisibleMessage] =
+          await Promise.all([
+            Message.countDocuments({
+              chat: chat._id,
+              sender: { $ne: req.user._id },
+              read: false,
+              deletedFor: { $ne: req.user._id },
+            }),
+            Message.findOne({
+              chat: chat._id,
+              deletedFor: { $ne: req.user._id },
+            })
+              .sort({ createdAt: -1 })
+              .populate("sender", "name email"),
+          ]);
 
         return {
           ...chat.toObject(),
+          latestMessage: latestVisibleMessage,
           unreadCount,
         };
       })

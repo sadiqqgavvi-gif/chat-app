@@ -107,17 +107,17 @@ function Header() {
   };
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm sm:px-6">
+    <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:px-6">
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-base font-semibold text-white">
           CA
         </div>
 
         <div className="text-left">
-          <h1 className="text-lg font-semibold text-gray-950">
+          <h1 className="text-lg font-semibold text-gray-950 dark:text-slate-100">
             Chat App
           </h1>
-          <p className="text-xs text-gray-500">Messages</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400">Messages</p>
         </div>
       </div>
 
@@ -125,10 +125,10 @@ function Header() {
         <button
           type="button"
           onClick={openSettings}
-          className="flex max-w-[11rem] items-center gap-2 rounded-full px-2 py-1.5 text-gray-700 hover:bg-gray-100"
+          className="flex max-w-[11rem] items-center gap-2 rounded-full px-2 py-1.5 text-gray-700 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
           title="Profile and settings"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700 dark:bg-slate-700 dark:text-slate-200">
             {user?.avatar ? (
               <img
                 src={user.avatar}
@@ -147,7 +147,7 @@ function Header() {
         <button
           type="button"
           onClick={openSettings}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
           title="Settings"
           aria-label="Settings"
         >
@@ -167,16 +167,16 @@ function Header() {
 
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-5 text-left shadow-xl">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 text-left shadow-xl dark:bg-slate-900">
             <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-950">
+              <h2 className="text-base font-semibold text-gray-950 dark:text-slate-100">
                 Profile settings
               </h2>
 
               <button
                 type="button"
                 onClick={() => setSettingsOpen(false)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
                 title="Close"
                 aria-label="Close"
               >
@@ -188,7 +188,7 @@ function Header() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xl font-semibold text-gray-700"
+                className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xl font-semibold text-gray-700 dark:bg-slate-700 dark:text-slate-100"
                 title="Change photo"
                 aria-label="Change photo"
               >
@@ -210,7 +210,7 @@ function Header() {
               <div className="min-w-0 flex-1">
                 <label
                   htmlFor="profile-name"
-                  className="mb-1 block text-sm font-medium text-gray-700"
+                  className="mb-1 block text-sm font-medium text-gray-700 dark:text-slate-300"
                 >
                   Display name
                 </label>
@@ -219,9 +219,9 @@ function Header() {
                   type="text"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 />
-                <p className="mt-1 truncate text-xs text-gray-500">
+                <p className="mt-1 truncate text-xs text-gray-500 dark:text-slate-400">
                   {user?.email}
                 </p>
               </div>
@@ -236,7 +236,7 @@ function Header() {
             />
 
             {error && (
-              <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+              <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
                 {error}
               </div>
             )}
@@ -245,7 +245,7 @@ function Header() {
               <button
                 type="button"
                 onClick={() => setSettingsOpen(false)}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Cancel
               </button>

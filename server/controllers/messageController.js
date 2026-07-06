@@ -1,5 +1,6 @@
 const Message = require("../models/Message");
 const Chat = require("../models/Chat");
+const User = require("../models/User");
 
 const emitToChatParticipants = async (
   req,
@@ -54,6 +55,31 @@ const sendMessage = async (req, res) => {
       return res.status(404).json({
         message: "Chat not found",
       });
+    }
+
+    if (!chat.isGroupChat && chat.users.length === 2) {
+      const otherUserId = chat.users.find(
+        (userId) => userId.toString() !== req.user._id.toString()
+      );
+
+      const [sender, recipient] = await Promise.all([
+        User.findById(req.user._id).select("blockedUsers"),
+        User.findById(otherUserId).select("blockedUsers"),
+      ]);
+
+      const senderBlockedRecipient = sender.blockedUsers.some(
+        (blockedId) => blockedId.toString() === otherUserId.toString()
+      );
+      const recipientBlockedSender = recipient.blockedUsers.some(
+        (blockedId) =>
+          blockedId.toString() === req.user._id.toString()
+      );
+
+      if (senderBlockedRecipient || recipientBlockedSender) {
+        return res.status(403).json({
+          message: "You can't send messages in this chat.",
+        });
+      }
     }
 
     if (replyTo) {
@@ -411,6 +437,51 @@ const editMessage = async (req, res) => {
   }
 };
 
+const clearChat = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      users: req.user._id,
+    });
+
+    if (!chat) {
+      return res.status(404).json({
+        message: "Chat not found",
+      });
+    }
+
+    await Message.updateMany(
+      {
+        chat: chatId,
+        deletedFor: { $ne: req.user._id },
+      },
+      {
+        $addToSet: {
+          deletedFor: req.user._id,
+        },
+      }
+    );
+
+    await Chat.findByIdAndUpdate(chatId, {
+      $set: {
+        [`unreadCounts.${req.user._id}`]: 0,
+      },
+    });
+
+    res.json({
+      success: true,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      message: "Server Error",
+    });
+  }
+};
+
 module.exports = {
   sendMessage,
   getMessages,
@@ -418,4 +489,5 @@ module.exports = {
   deleteMessageForMe,
   deleteMessageForEveryone,
   editMessage,
+  clearChat,
 };

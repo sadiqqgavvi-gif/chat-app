@@ -153,7 +153,7 @@ function Home() {
   ]);
 
   return (
-    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-gray-100">
+    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-gray-100 dark:bg-slate-950">
       <Header />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

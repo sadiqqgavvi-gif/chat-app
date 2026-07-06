@@ -89,3 +89,15 @@ export const editMessage = async (
     }
   );
 };
+
+export const clearChat = async (chatId, token) => {
+  return api.put(
+    `/message/clear/${chatId}`,
+    {},
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+};

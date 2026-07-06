@@ -87,17 +87,17 @@ function ChatList() {
   }, [token, setChats]);
 
   if (!token) {
-    return <div className="p-4 text-gray-500">Loading user...</div>;
+    return <div className="p-4 text-gray-500 dark:text-slate-400">Loading user...</div>;
   }
 
   if (loading) {
-    return <div className="p-4 text-gray-500">Loading chats...</div>;
+    return <div className="p-4 text-gray-500 dark:text-slate-400">Loading chats...</div>;
   }
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       {chats.length === 0 ? (
-        <div className="p-4 text-sm text-gray-500">
+        <div className="p-4 text-sm text-gray-500 dark:text-slate-400">
           Search for people or create a group to start chatting.
         </div>
       ) : (
@@ -122,11 +122,13 @@ function ChatList() {
                 setSelectedChat(chat);
                 setReplyMessage(null);
               }}
-              className={`flex w-full items-center gap-3 border-b border-gray-200 px-4 py-3 text-left transition hover:bg-gray-100 ${
-                selected ? "bg-blue-50" : "bg-white"
+              className={`flex w-full items-center gap-3 border-b border-gray-200 px-4 py-3 text-left transition hover:bg-gray-100 dark:border-slate-800 dark:hover:bg-slate-800 ${
+                selected
+                  ? "bg-blue-50 dark:bg-blue-950/30"
+                  : "bg-white dark:bg-slate-900"
               }`}
             >
-              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700">
+              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700 dark:bg-slate-700 dark:text-slate-200">
                 {isGroup ? (
                   <FiUsers />
                 ) : otherUser?.avatar ? (
@@ -146,7 +148,7 @@ function ChatList() {
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-semibold text-gray-950">
+                  <span className="truncate text-sm font-semibold text-gray-950 dark:text-slate-100">
                     {title}
                   </span>
 
@@ -157,7 +159,7 @@ function ChatList() {
                   )}
                 </div>
 
-                <p className="mt-0.5 truncate text-sm text-gray-500">
+                <p className="mt-0.5 truncate text-sm text-gray-500 dark:text-slate-400">
                   {getLatestPreview(chat)}
                 </p>
               </div>

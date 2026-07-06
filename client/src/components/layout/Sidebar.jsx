@@ -114,10 +114,10 @@ function Sidebar() {
   };
 
   return (
-    <aside className="flex w-80 min-w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50 max-md:w-72">
-      <div className="border-b border-gray-200 p-4">
+    <aside className="flex w-80 min-w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50 dark:border-slate-800 dark:bg-slate-900 max-md:w-72">
+      <div className="border-b border-gray-200 p-4 dark:border-slate-800">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-slate-100">
             Chats
           </h2>
 
@@ -143,7 +143,7 @@ function Sidebar() {
             placeholder="Group name"
             value={groupName}
             onChange={(event) => setGroupName(event.target.value)}
-            className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
           />
         )}
 
@@ -154,7 +154,7 @@ function Sidebar() {
                 key={selectedUser._id}
                 type="button"
                 onClick={() => toggleGroupUser(selectedUser)}
-                className="inline-flex max-w-full items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs text-blue-800"
+                className="inline-flex max-w-full items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs text-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
               >
                 <span className="truncate">{selectedUser.name}</span>
                 <FiX />
@@ -164,7 +164,7 @@ function Sidebar() {
         )}
 
         <div className="relative">
-          <FiSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <FiSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
           <input
             type="text"
             placeholder={
@@ -172,19 +172,19 @@ function Sidebar() {
             }
             value={search}
             onChange={(event) => handleSearch(event.target.value)}
-            className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500"
+            className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
           />
         </div>
 
         {error && (
-          <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-left text-xs text-red-700">
+          <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-left text-xs text-red-700 dark:bg-red-950/40 dark:text-red-200">
             {error}
           </div>
         )}
       </div>
 
       {results.length > 0 && (
-        <div className="border-b border-gray-200 bg-white">
+        <div className="border-b border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           {results.map((resultUser) => {
             const selected = selectedUsers.some(
               (selectedUser) => selectedUser._id === resultUser._id
@@ -199,14 +199,14 @@ function Sidebar() {
                     ? toggleGroupUser(resultUser)
                     : handleCreateChat(resultUser._id)
                 }
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-100"
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-slate-800"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-gray-900">
+                  <div className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">
                     {resultUser.name}
                   </div>
 
-                  <div className="truncate text-xs text-gray-500">
+                  <div className="truncate text-xs text-gray-500 dark:text-slate-400">
                     {resultUser.email}
                   </div>
                 </div>
@@ -229,7 +229,7 @@ function Sidebar() {
       )}
 
       {groupMode && (
-        <div className="border-b border-gray-200 bg-white p-4">
+        <div className="border-b border-gray-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <button
             type="button"
             onClick={handleCreateGroup}

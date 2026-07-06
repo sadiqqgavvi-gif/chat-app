@@ -66,6 +66,13 @@ function getReplyLabel(message) {
   return message.attachments?.[0]?.name || "Attachment";
 }
 
+function hasBlocked(user, userId) {
+  return user?.blockedUsers?.some(
+    (blockedId) =>
+      (blockedId._id || blockedId).toString() === userId?.toString()
+  );
+}
+
 function MessageInput() {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState([]);
@@ -78,7 +85,7 @@ function MessageInput() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  const { token } = useAuth();
+  const { token, user } = useAuth();
 
   const {
     selectedChat,
@@ -235,21 +242,39 @@ function MessageInput() {
     return null;
   }
 
+  const otherUser = selectedChat.users.find(
+    (currentUser) => currentUser._id !== user.id
+  );
+  const blockedByMe =
+    !selectedChat.isGroupChat && hasBlocked(user, otherUser?._id);
+  const blockedMe =
+    !selectedChat.isGroupChat && hasBlocked(otherUser, user.id);
+
+  if (blockedByMe || blockedMe) {
+    return (
+      <div className="border-t border-gray-200 bg-white px-4 py-3 text-center text-sm text-gray-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        {blockedByMe
+          ? "You blocked this contact. Unblock them from chat options to send messages."
+          : "You can't send messages to this contact."}
+      </div>
+    );
+  }
+
   return (
-    <div className="border-t border-gray-200 bg-white px-3 py-3 sm:px-4">
+    <div className="border-t border-gray-200 bg-white px-3 py-3 dark:border-slate-800 dark:bg-slate-900 sm:px-4">
       {error && (
-        <div className="mb-2 rounded-md bg-red-50 px-3 py-2 text-left text-sm text-red-700">
+        <div className="mb-2 rounded-md bg-red-50 px-3 py-2 text-left text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
           {error}
         </div>
       )}
 
       {replyMessage && (
-        <div className="mb-2 flex items-center justify-between rounded-md border-l-4 border-blue-500 bg-blue-50 px-3 py-2 text-left">
+        <div className="mb-2 flex items-center justify-between rounded-md border-l-4 border-blue-500 bg-blue-50 px-3 py-2 text-left dark:bg-blue-950/30">
           <div className="min-w-0">
-            <div className="text-xs font-semibold text-blue-700">
+            <div className="text-xs font-semibold text-blue-700 dark:text-blue-200">
               Replying to {replyMessage.sender?.name || "message"}
             </div>
-            <div className="truncate text-sm text-gray-700">
+            <div className="truncate text-sm text-gray-700 dark:text-slate-300">
               {getReplyLabel(replyMessage)}
             </div>
           </div>
@@ -257,7 +282,7 @@ function MessageInput() {
           <button
             type="button"
             onClick={() => setReplyMessage(null)}
-            className="ml-3 rounded-full p-1 text-gray-500 hover:bg-white"
+            className="ml-3 rounded-full p-1 text-gray-500 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
             title="Cancel reply"
             aria-label="Cancel reply"
           >
@@ -271,7 +296,7 @@ function MessageInput() {
           {attachments.map((attachment, index) => (
             <div
               key={`${attachment.name}-${index}`}
-              className="relative flex h-20 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-gray-50 text-xs text-gray-600"
+              className="relative flex h-20 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-gray-50 text-xs text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
             >
               {attachment.mimeType.startsWith("image/") ? (
                 <img
@@ -302,13 +327,13 @@ function MessageInput() {
       )}
 
       {showEmojiPicker && (
-        <div className="mb-2 grid w-fit grid-cols-8 gap-1 rounded-md border bg-white p-2 shadow-lg">
+        <div className="mb-2 grid w-fit grid-cols-8 gap-1 rounded-md border bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
           {EMOJIS.map((emoji) => (
             <button
               key={emoji}
               type="button"
               onClick={() => setMessage((prev) => `${prev}${emoji}`)}
-              className="h-8 w-8 rounded hover:bg-gray-100"
+              className="h-8 w-8 rounded hover:bg-gray-100 dark:hover:bg-slate-800"
             >
               {emoji}
             </button>
@@ -320,7 +345,7 @@ function MessageInput() {
         <button
           type="button"
           onClick={() => setShowEmojiPicker((prev) => !prev)}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
           title="Emoji"
           aria-label="Emoji"
         >
@@ -330,7 +355,7 @@ function MessageInput() {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
           title="Attach file"
           aria-label="Attach file"
         >
@@ -340,7 +365,7 @@ function MessageInput() {
         <button
           type="button"
           onClick={() => imageInputRef.current?.click()}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
           title="Attach image"
           aria-label="Attach image"
         >
@@ -367,7 +392,7 @@ function MessageInput() {
         <input
           type="text"
           placeholder="Type a message..."
-          className="min-w-0 flex-1 rounded-full border border-gray-300 px-4 py-3 text-sm outline-none focus:border-blue-500"
+          className="min-w-0 flex-1 rounded-full border border-gray-300 px-4 py-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
           value={message}
           onChange={handleTyping}
           onKeyDown={(event) => {
@@ -383,7 +408,7 @@ function MessageInput() {
           className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
             isRecording
               ? "bg-red-100 text-red-600"
-              : "text-gray-600 hover:bg-gray-100"
+              : "text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
           }`}
           title={isRecording ? "Stop recording" : "Record voice note"}
           aria-label={

@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  FiMoreVertical,
+  FiMoon,
   FiPlus,
   FiSettings,
+  FiSlash,
+  FiSun,
+  FiTrash2,
   FiUserMinus,
   FiUsers,
   FiX,
@@ -10,12 +15,18 @@ import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import { useChat } from "../../context/useChat";
 import { useAuth } from "../../context/useAuth";
-import { searchUsers } from "../../services/userService";
+import { useTheme } from "../../context/useTheme";
+import {
+  blockUser,
+  searchUsers,
+  unblockUser,
+} from "../../services/userService";
 import {
   addUserToGroup,
   removeUserFromGroup,
   renameGroupChat,
 } from "../../services/chatService";
+import { clearChat } from "../../services/messageService";
 import socket from "../../socket";
 
 function getInitials(name = "") {
@@ -27,18 +38,30 @@ function getInitials(name = "") {
     .join("");
 }
 
+function hasBlocked(user, userId) {
+  return user?.blockedUsers?.some(
+    (blockedId) =>
+      (blockedId._id || blockedId).toString() === userId?.toString()
+  );
+}
+
 function ChatWindow() {
   const {
     selectedChat,
     setSelectedChat,
     setChats,
+    setMessages,
+    setReplyMessage,
     isTyping,
     setIsTyping,
   } = useChat();
 
-  const { user, token } = useAuth();
+  const { user, token, updateUser } = useAuth();
+  const { theme, toggleTheme } = useTheme();
+  const menuRef = useRef(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [memberResults, setMemberResults] = useState([]);
@@ -68,9 +91,23 @@ function ChatWindow() {
     };
   }, [selectedChat, setIsTyping]);
 
+  useEffect(() => {
+    const handleDismiss = (event) => {
+      if (!menuRef.current?.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", handleDismiss);
+
+    return () => {
+      window.removeEventListener("mousedown", handleDismiss);
+    };
+  }, []);
+
   if (!selectedChat) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-gray-900 text-gray-400">
+      <div className="flex flex-1 items-center justify-center bg-gray-900 text-gray-400 dark:bg-slate-950 dark:text-slate-500">
         Select a chat to start messaging
       </div>
     );
@@ -87,12 +124,14 @@ function ChatWindow() {
     ? `${selectedChat.users.length} members`
     : otherUser?.email || "";
   const isAdmin = selectedChat.groupAdmin?._id === user.id;
+  const blockedByMe = !isGroup && hasBlocked(user, otherUser?._id);
 
   const openGroupSettings = () => {
     setGroupName(selectedChat.chatName || "");
     setError("");
     setMemberSearch("");
     setMemberResults([]);
+    setMenuOpen(false);
     setSettingsOpen(true);
   };
 
@@ -108,6 +147,73 @@ function ChatWindow() {
       )
     );
     setSelectedChat(updatedChat);
+  };
+
+  const handleClearChat = async () => {
+    const confirmed = window.confirm(
+      "Clear all messages in this chat for you?"
+    );
+
+    if (!confirmed) {
+      setMenuOpen(false);
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError("");
+      setMenuOpen(false);
+
+      await clearChat(selectedChat._id, token);
+
+      setMessages([]);
+      setReplyMessage(null);
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat._id === selectedChat._id
+            ? {
+                ...chat,
+                latestMessage: null,
+                unreadCount: 0,
+              }
+            : chat
+        )
+      );
+      setSelectedChat({
+        ...selectedChat,
+        latestMessage: null,
+        unreadCount: 0,
+      });
+    } catch (err) {
+      setError(
+        err.response?.data?.message || "Could not clear chat."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleBlockToggle = async () => {
+    if (!otherUser) return;
+
+    try {
+      setSaving(true);
+      setError("");
+      setMenuOpen(false);
+
+      const response = blockedByMe
+        ? await unblockUser(otherUser._id, token)
+        : await blockUser(otherUser._id, token);
+
+      updateUser(response.data);
+      setReplyMessage(null);
+    } catch (err) {
+      setError(
+        err.response?.data?.message || "Could not update block status."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSearchMembers = async (value) => {
@@ -217,10 +323,10 @@ function ChatWindow() {
   };
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex min-h-16 items-center justify-between border-b border-gray-200 bg-white px-4">
+    <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-slate-950">
+      <div className="flex min-h-16 items-center justify-between border-b border-gray-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700 dark:bg-slate-700 dark:text-slate-200">
             {isGroup ? (
               <FiUsers />
             ) : otherUser?.avatar ? (
@@ -235,28 +341,80 @@ function ChatWindow() {
           </div>
 
           <div className="min-w-0 text-left">
-            <h2 className="truncate text-base font-semibold text-gray-950">
+            <h2 className="truncate text-base font-semibold text-gray-950 dark:text-slate-100">
               {title}
             </h2>
 
-            <p className="truncate text-sm text-gray-500">
+            <p className="truncate text-sm text-gray-500 dark:text-slate-400">
               {isTyping ? "Typing..." : subtitle}
             </p>
           </div>
         </div>
 
-        {isGroup && (
+        <div ref={menuRef} className="relative">
           <button
             type="button"
-            onClick={openGroupSettings}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
-            title="Group settings"
-            aria-label="Group settings"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            title="Chat options"
+            aria-label="Chat options"
           >
-            <FiSettings />
+            <FiMoreVertical />
           </button>
-        )}
+
+          {menuOpen && (
+            <div className="absolute right-0 top-12 z-40 w-56 overflow-hidden rounded-md border border-gray-200 bg-white py-2 text-sm text-gray-800 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 dark:hover:bg-slate-800"
+              >
+                {theme === "dark" ? <FiSun /> : <FiMoon />}
+                {theme === "dark" ? "Light mode" : "Dark mode"}
+              </button>
+
+              {isGroup && (
+                <button
+                  type="button"
+                  onClick={openGroupSettings}
+                  className="flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 dark:hover:bg-slate-800"
+                >
+                  <FiSettings />
+                  Group settings
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleClearChat}
+                disabled={saving}
+                className="flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 disabled:opacity-60 dark:hover:bg-slate-800"
+              >
+                <FiTrash2 />
+                Clear chat
+              </button>
+
+              {!isGroup && otherUser && (
+                <button
+                  type="button"
+                  onClick={handleBlockToggle}
+                  disabled={saving}
+                  className="flex h-10 w-full items-center gap-3 px-3 text-left text-red-600 hover:bg-red-50 disabled:opacity-60 dark:hover:bg-red-950/40"
+                >
+                  <FiSlash />
+                  {blockedByMe ? "Unblock" : "Block"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+
+      {error && (
+        <div className="border-b border-red-200 bg-red-50 px-4 py-2 text-left text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+          {error}
+        </div>
+      )}
 
       <MessageList />
 
@@ -264,13 +422,13 @@ function ChatWindow() {
 
       {settingsOpen && isGroup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-5 text-left shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-5 text-left shadow-xl dark:bg-slate-900">
             <div className="mb-5 flex items-center justify-between">
               <div>
-                <h2 className="text-base font-semibold text-gray-950">
+                <h2 className="text-base font-semibold text-gray-950 dark:text-slate-100">
                   Group settings
                 </h2>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-slate-400">
                   {selectedChat.users.length} members
                 </p>
               </div>
@@ -278,7 +436,7 @@ function ChatWindow() {
               <button
                 type="button"
                 onClick={() => setSettingsOpen(false)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
                 title="Close"
                 aria-label="Close"
               >
@@ -287,7 +445,7 @@ function ChatWindow() {
             </div>
 
             {error && (
-              <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+              <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
                 {error}
               </div>
             )}
@@ -296,7 +454,7 @@ function ChatWindow() {
               <div className="mb-5">
                 <label
                   htmlFor="group-name"
-                  className="mb-1 block text-sm font-medium text-gray-700"
+                  className="mb-1 block text-sm font-medium text-gray-700 dark:text-slate-300"
                 >
                   Group name
                 </label>
@@ -308,7 +466,7 @@ function ChatWindow() {
                     onChange={(event) =>
                       setGroupName(event.target.value)
                     }
-                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                   <button
                     type="button"
@@ -326,7 +484,7 @@ function ChatWindow() {
               <div className="mb-5">
                 <label
                   htmlFor="member-search"
-                  className="mb-1 block text-sm font-medium text-gray-700"
+                  className="mb-1 block text-sm font-medium text-gray-700 dark:text-slate-300"
                 >
                   Add members
                 </label>
@@ -338,24 +496,24 @@ function ChatWindow() {
                     handleSearchMembers(event.target.value)
                   }
                   placeholder="Search users..."
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 />
 
                 {memberResults.length > 0 && (
-                  <div className="mt-2 overflow-hidden rounded-md border border-gray-200">
+                  <div className="mt-2 overflow-hidden rounded-md border border-gray-200 dark:border-slate-700">
                     {memberResults.map((candidate) => (
                       <button
                         key={candidate._id}
                         type="button"
                         onClick={() => handleAddMember(candidate._id)}
                         disabled={saving}
-                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-slate-800"
                       >
                         <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium text-gray-900">
+                          <span className="block truncate text-sm font-medium text-gray-900 dark:text-slate-100">
                             {candidate.name}
                           </span>
-                          <span className="block truncate text-xs text-gray-500">
+                          <span className="block truncate text-xs text-gray-500 dark:text-slate-400">
                             {candidate.email}
                           </span>
                         </span>
@@ -378,14 +536,14 @@ function ChatWindow() {
                 return (
                   <div
                     key={member._id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2"
+                    className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2 dark:border-slate-700"
                   >
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-950">
+                      <div className="truncate text-sm font-medium text-gray-950 dark:text-slate-100">
                         {member.name}
                         {member._id === user.id ? " (you)" : ""}
                       </div>
-                      <div className="truncate text-xs text-gray-500">
+                      <div className="truncate text-xs text-gray-500 dark:text-slate-400">
                         {memberIsAdmin ? "Admin" : member.email}
                       </div>
                     </div>
@@ -395,7 +553,7 @@ function ChatWindow() {
                         type="button"
                         onClick={() => handleRemoveMember(member._id)}
                         disabled={saving}
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-red-950/40"
                         title={
                           member._id === user.id
                             ? "Leave group"
