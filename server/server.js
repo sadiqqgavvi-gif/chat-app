@@ -1,157 +1,91 @@
+const path = require("path");
+const fs = require("fs");
+const http = require("http");
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+require("dotenv").config({ quiet: true });
+
 const connectDB = require("./config/db");
-const authRoutes = require("./routes/authRoutes");
-const chatRoutes = require("./routes/chatRoutes");
-const messageRoutes = require("./routes/messageRoutes");
-const http = require("http");
-const { Server } = require("socket.io");
-const userRoutes = require("./routes/userRoutes");
+const migrate = require("./utils/migrate");
+const { initRealtime } = require("./utils/realtime");
+const { notFound, errorHandler } = require("./middleware/errorHandler");
 
+const isProduction = process.env.NODE_ENV === "production";
 
-dotenv.config();
+if (!process.env.JWT_SECRET) {
+  if (isProduction) {
+    console.error("JWT_SECRET is required in production");
+    process.exit(1);
+  }
+  process.env.JWT_SECRET = "dev-only-secret-change-me";
+  console.warn("JWT_SECRET not set - using an insecure development secret");
+}
 
-connectDB();
+// CLIENT_URL may list several allowed origins separated by commas.
+const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+const corsOptions = { origin: allowedOrigins, credentials: true };
 
 const app = express();
 const server = http.createServer(app);
 
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+app.set("trust proxy", 1);
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    // Uploaded media is embedded by the client, which may be on another origin.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
+app.use(cors(corsOptions));
+app.use(express.json({ limit: "1mb" }));
 
-app.use(cors({
-  origin: CLIENT_URL,
-  credentials: true,
-}));
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-
-
-app.use("/api/auth", authRoutes);
-app.use("/api/chat", chatRoutes);
-app.use("/api/message", messageRoutes);
-app.use("/api/user", userRoutes);
-
-app.get("/", (req, res) => {
-  res.send("API Running");
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many attempts, please try again later" },
 });
 
-const PORT = process.env.PORT || 5000;
+app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/user", require("./routes/userRoutes"));
+app.use("/api/chat", require("./routes/chatRoutes"));
+app.use("/api/message", require("./routes/messageRoutes"));
+app.use("/api", require("./routes/fileRoutes"));
+app.use("/api", notFound);
 
-const io = new Server(server, {
-  cors: {
-    origin: CLIENT_URL,
-    credentials: true,
-  },
-});
-
-app.set("io", io);
-
-const onlineUsers = new Map();
-
-io.on("connection", (socket) => {
-  console.log("User Connected:", socket.id);
-
-  socket.on("setup", async (userData) => {
-  if (!userData || !userData.id) return;
-
-  socket.join(userData.id);
-
-  onlineUsers.set(userData.id, socket.id);
-
-  const Message = require("./models/Message");
-  const Chat = require("./models/Chat");
-
-  const chats = await Chat.find({
-    users: userData.id,
-  }).select("_id");
-
-  const chatIds = chats.map((chat) => chat._id);
-
-  const pendingMessages = await Message.find({
-    chat: { $in: chatIds },
-    sender: { $ne: userData.id },
-    delivered: false,
+// When the client has been built (npm run build in /client) this server
+// can serve it too, so the whole app deploys as a single service.
+const clientDist = path.join(__dirname, "..", "client", "dist");
+if (fs.existsSync(path.join(clientDist, "index.html"))) {
+  app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
+  app.get(/^\/(?!api\/|socket\.io\/).*/, (req, res) => {
+    res.sendFile(path.join(clientDist, "index.html"));
   });
+} else {
+  app.get("/", (req, res) => res.send("Chat App API is running"));
+}
 
-  for (const message of pendingMessages) {
-    message.delivered = true;
-    await message.save();
+app.use(errorHandler);
 
-    io.to(message.sender.toString()).emit(
-      "message delivered",
-      message._id
-    );
-  }
+const start = async () => {
+  await connectDB();
+  await migrate();
+  initRealtime(server, corsOptions);
 
-  io.emit("online users", [...onlineUsers.keys()]);
+  const port = process.env.PORT || 5000;
+  server.listen(port, () => console.log(`Server running on port ${port}`));
+};
 
-  console.log(`${userData.name} joined`);
-
-  socket.emit("connected");
-});
-
-  socket.on("join chat", (room) => {
-    socket.join(room);
-    console.log(`Socket ${socket.id} joined chat ${room}`);
-  });
-
-  socket.on("typing", (room) => {
-  socket.to(room).emit("typing");
-});
-
-socket.on("message delivered", async (messageId) => {
-  try {
-    const Message = require("./models/Message");
-
-    const message = await Message.findByIdAndUpdate(
-      messageId,
-      {
-        delivered: true,
-      },
-      {
-        new: true,
-      }
-    )
-      .populate("sender", "_id")
-      .populate({
-        path: "chat",
-        populate: {
-          path: "users",
-          select: "_id",
-        },
-      });
-
-    if (!message) return;
-
-    // Notify ONLY the sender
-    io.to(message.sender._id.toString()).emit(
-      "message delivered",
-      messageId
-    );
-  } catch (err) {
-    console.error(err);
-  }
-});
-
-socket.on("stop typing", (room) => {
-  socket.to(room).emit("stop typing");
-});
-
-  socket.on("disconnect", () => {
-    console.log("User Disconnected:", socket.id);
-
-    for (const [userId, socketId] of onlineUsers.entries()) {
-      if (socketId === socket.id) {
-        onlineUsers.delete(userId);
-        break;
-      }
-    }
-
-    io.emit("online users", [...onlineUsers.keys()]);
-  });
-});
-
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+start().catch((err) => {
+  console.error("Failed to start server:", err.message);
+  process.exit(1);
 });

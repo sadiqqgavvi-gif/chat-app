@@ -2,49 +2,158 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Semantic colour tokens. Components use these (bg-panel, text-muted,
+   border-line, ...) so light and dark themes are defined in one place. */
 :root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
-  color: #111827;
-  background: #f3f4f6;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --app: #e8ecf2;
+  --panel: #ffffff;
+  --soft: #f1f4f9;
+  --hover: #eef2f7;
+  --line: #e2e8f0;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --chat: #e9edf4;
+  --chat-dot: rgba(15, 23, 42, 0.045);
+  --bubble-in: #ffffff;
+  --bubble-out: #2563eb;
+  --selected: #e8f0fe;
+  color-scheme: light;
 }
 
 :root.dark {
-  color: #e5e7eb;
-  background: #0f172a;
+  --app: #070c16;
+  --panel: #0f1726;
+  --soft: #1a2437;
+  --hover: #18223a;
+  --line: #222e45;
+  --ink: #e8edf7;
+  --muted: #93a3bf;
+  --faint: #64748b;
+  --chat: #0a101c;
+  --chat-dot: rgba(148, 163, 184, 0.05);
+  --bubble-in: #1a2437;
+  --bubble-out: #2563eb;
+  --selected: #1b2a4a;
   color-scheme: dark;
 }
 
-* {
-  box-sizing: border-box;
+@theme inline {
+  --color-app: var(--app);
+  --color-panel: var(--panel);
+  --color-soft: var(--soft);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-chat: var(--chat);
+  --color-bubble-in: var(--bubble-in);
+  --color-bubble-out: var(--bubble-out);
+  --color-selected: var(--selected);
+  --color-brand: #2563eb;
+  --color-brand-strong: #1d4ed8;
+  --color-brand-soft: #60a5fa;
+  --color-online: #22c55e;
+  --color-danger: #dc2626;
+
+  --animate-pop: pop 0.14s ease-out;
+  --animate-slide-in: slide-in 0.2s ease-out;
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-flash: flash 1.6s ease-out;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes flash {
+  0%,
+  35% {
+    background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
 }
 
 html,
 body,
 #root {
-  min-height: 100%;
-  width: 100%;
+  height: 100%;
 }
 
 body {
   margin: 0;
   overflow: hidden;
-}
-
-button,
-input,
-textarea {
-  font: inherit;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Noto Color Emoji";
+  color: var(--ink);
+  background: var(--app);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button {
   cursor: pointer;
 }
-
 button:disabled {
   cursor: not-allowed;
+}
+
+/* Thin, unobtrusive scrollbars inside panels. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
+}
+
+.chat-wallpaper {
+  background-color: var(--chat);
+  background-image: radial-gradient(var(--chat-dot) 1.5px, transparent 1.5px);
+  background-size: 22px 22px;
+}
+
+.typing-dot {
+  animation: typing-dot 1.2s infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

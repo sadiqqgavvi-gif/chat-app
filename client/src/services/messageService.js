@@ -1,103 +1,29 @@
-import api from "./api";
+import api from "../lib/api";
 
-export const sendMessage = async (
-  content,
-  chatId,
-  token,
-  options = {}
-) => {
-  return api.post(
-    "/message",
-    {
-      content,
-      chatId,
-      attachments: options.attachments || [],
-      replyTo: options.replyTo || null,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-};
+export const fetchMessages = (chatId, params) =>
+  api.get(`/message/chat/${chatId}`, { params });
+export const searchMessages = (chatId, q, signal) =>
+  api.get(`/message/chat/${chatId}/search`, { params: { q }, signal });
+export const fetchMedia = (chatId) => api.get(`/message/chat/${chatId}/media`);
+export const fetchStarred = () => api.get("/message/starred");
+export const sendMessage = (data) => api.post("/message", data);
+export const forwardMessages = (messageIds, chatIds) =>
+  api.post("/message/forward", { messageIds, chatIds });
+export const editMessage = (messageId, content) =>
+  api.put(`/message/${messageId}/edit`, { content });
+export const reactToMessage = (messageId, emoji) =>
+  api.put(`/message/${messageId}/react`, { emoji });
+export const starMessage = (messageId, starred) =>
+  api.put(`/message/${messageId}/star`, { starred });
+export const deleteMessage = (messageId, scope) =>
+  api.delete(`/message/${messageId}`, { params: { scope } });
 
-export const fetchMessages = async (chatId, token) => {
-  return api.get(`/message/${chatId}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
+export const uploadFile = (file, name, onProgress) => {
+  const form = new FormData();
+  form.append("file", file, name);
+  return api.post("/upload", form, {
+    onUploadProgress: (event) => {
+      if (event.total) onProgress?.(event.loaded / event.total);
     },
   });
-};
-
-export const markMessagesAsRead = async (chatId, token) => {
-  return api.put(
-    "/message/read",
-    {
-      chatId,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-};
-
-export const deleteMessageForMe = async (
-  messageId,
-  token
-) => {
-  return api.put(
-    `/message/delete/${messageId}`,
-    {},
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-};
-
-export const deleteMessageForEveryone = async (
-  messageId,
-  token
-) => {
-  return api.put(
-    `/message/delete-everyone/${messageId}`,
-    {},
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-};
-
-export const editMessage = async (
-  messageId,
-  content,
-  token
-) => {
-  return api.put(
-    `/message/edit/${messageId}`,
-    { content },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-};
-
-export const clearChat = async (chatId, token) => {
-  return api.put(
-    `/message/clear/${chatId}`,
-    {},
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
 };

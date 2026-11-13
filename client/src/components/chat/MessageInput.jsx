@@ -1,435 +1,541 @@
-import { useRef, useState } from "react";
 import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  FiCornerUpLeft,
+  FiEdit2,
+  FiFile,
   FiImage,
   FiMic,
   FiPaperclip,
   FiSend,
   FiSmile,
-  FiStopCircle,
+  FiTrash2,
   FiX,
 } from "react-icons/fi";
-import { sendMessage } from "../../services/messageService";
-import { useAuth } from "../../context/useAuth";
-import { useChat } from "../../context/useChat";
-import socket from "../../socket";
+import EmojiPicker from "../ui/EmojiPicker";
+import IconButton from "../ui/IconButton";
+import Menu from "../ui/Menu";
+import { useAuth, useChat, useToast } from "../../context/contexts";
+import socket from "../../lib/socket";
+import {
+  formatBytes,
+  formatDuration,
+  messagePreview,
+  otherUserOf,
+  senderId,
+} from "../../lib/format";
+import { MAX_FILE_BYTES, pickRecorderMimeType, prepareAttachment } from "../../lib/media";
 
-const EMOJIS = [
-  "\u{1F600}",
-  "\u{1F602}",
-  "\u{1F60D}",
-  "\u{1F60E}",
-  "\u{1F973}",
-  "\u{1F44D}",
-  "\u{1F64F}",
-  "\u{1F525}",
-  "\u2764\uFE0F",
-  "\u2705",
-  "\u{1F389}",
-  "\u{1F91D}",
-  "\u{1F605}",
-  "\u{1F62D}",
-  "\u{1F621}",
-  "\u{1F4AF}",
-];
+const MAX_FILES = 10;
+const TYPING_IDLE_MS = 2500;
+// Unsent text per chat, kept while the app is open.
+const drafts = new Map();
 
-const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const isTouch = () => window.matchMedia("(pointer: coarse)").matches;
 
-function fileToAttachment(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      resolve({
-        url: reader.result,
-        name: file.name,
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
-      });
-    };
-
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function getReplyLabel(message) {
-  if (!message) return "";
-
-  if (message.content) return message.content;
-  if (message.attachments?.[0]?.mimeType?.startsWith("image/")) {
-    return "Photo";
-  }
-  if (message.attachments?.[0]?.mimeType?.startsWith("audio/")) {
-    return "Voice note";
-  }
-
-  return message.attachments?.[0]?.name || "Attachment";
-}
-
-function hasBlocked(user, userId) {
-  return user?.blockedUsers?.some(
-    (blockedId) =>
-      (blockedId._id || blockedId).toString() === userId?.toString()
-  );
-}
-
-function MessageInput() {
-  const [message, setMessage] = useState("");
-  const [attachments, setAttachments] = useState([]);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [error, setError] = useState("");
-
-  const fileInputRef = useRef(null);
-  const imageInputRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-
-  const { token, user } = useAuth();
-
-  const {
-    selectedChat,
-    setMessages,
-    replyMessage,
-    setReplyMessage,
-  } = useChat();
-
-  const handleTyping = (event) => {
-    setMessage(event.target.value);
-
-    if (!selectedChat) return;
-
-    socket.emit("typing", selectedChat._id);
-
-    clearTimeout(window.typingTimeout);
-
-    window.typingTimeout = setTimeout(() => {
-      socket.emit("stop typing", selectedChat._id);
-    }, 1200);
-  };
-
-  const handleFiles = async (event) => {
-    const files = Array.from(event.target.files || []);
-
-    if (files.length === 0) return;
-
-    const oversizedFile = files.find(
-      (file) => file.size > MAX_ATTACHMENT_BYTES
-    );
-
-    if (oversizedFile) {
-      setError("Attachments must be 5 MB or smaller.");
-      event.target.value = "";
-      return;
-    }
-
-    try {
-      setError("");
-      const convertedFiles = await Promise.all(
-        files.map(fileToAttachment)
-      );
-
-      setAttachments((prev) => [...prev, ...convertedFiles]);
-    } catch {
-      setError("Could not attach that file.");
-    } finally {
-      event.target.value = "";
-    }
-  };
-
-  const startRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Voice recording is not supported in this browser.");
-      return;
-    }
-
-    try {
-      setError("");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-      const recorder = new MediaRecorder(stream);
-
-      audioChunksRef.current = [];
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        try {
-          const blob = new Blob(audioChunksRef.current, {
-            type: "audio/webm",
-          });
-
-          if (blob.size > MAX_ATTACHMENT_BYTES) {
-            setError("Voice notes must be 5 MB or smaller.");
-            return;
-          }
-
-          const file = new File([blob], `voice-${Date.now()}.webm`, {
-            type: "audio/webm",
-          });
-
-          const voiceAttachment = await fileToAttachment(file);
-          setAttachments((prev) => [...prev, voiceAttachment]);
-        } catch {
-          setError("Could not attach that voice note.");
-        } finally {
-          stream.getTracks().forEach((track) => track.stop());
-        }
-      };
-
-      recorder.start();
-      setIsRecording(true);
-    } catch {
-      setError("Microphone permission was denied.");
-    }
-  };
-
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
-  };
-
-  const removeAttachment = (index) => {
-    setAttachments((prev) =>
-      prev.filter((_, currentIndex) => currentIndex !== index)
-    );
-  };
-
-  const handleSend = async () => {
-    const trimmedMessage = message.trim();
-
-    if (!selectedChat) return;
-    if (!trimmedMessage && attachments.length === 0) return;
-
-    socket.emit("stop typing", selectedChat._id);
-
-    try {
-      setError("");
-
-      const response = await sendMessage(
-        trimmedMessage,
-        selectedChat._id,
-        token,
-        {
-          attachments,
-          replyTo: replyMessage?._id,
-        }
-      );
-
-      setMessages((prev) =>
-        prev.some((item) => item._id === response.data._id)
-          ? prev
-          : [...prev, response.data]
-      );
-      setMessage("");
-      setAttachments([]);
-      setReplyMessage(null);
-      setShowEmojiPicker(false);
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Could not send message."
-      );
-    }
-  };
-
-  if (!selectedChat) {
-    return null;
-  }
-
-  const otherUser = selectedChat.users.find(
-    (currentUser) => currentUser._id !== user.id
-  );
-  const blockedByMe =
-    !selectedChat.isGroupChat && hasBlocked(user, otherUser?._id);
-  const blockedMe =
-    !selectedChat.isGroupChat && hasBlocked(otherUser, user.id);
-
-  if (blockedByMe || blockedMe) {
-    return (
-      <div className="border-t border-gray-200 bg-white px-4 py-3 text-center text-sm text-gray-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-        {blockedByMe
-          ? "You blocked this contact. Unblock them from chat options to send messages."
-          : "You can't send messages to this contact."}
-      </div>
-    );
-  }
-
+function ContextBar({ icon: Icon, title, text, onCancel }) {
   return (
-    <div className="border-t border-gray-200 bg-white px-3 py-3 dark:border-slate-800 dark:bg-slate-900 sm:px-4">
-      {error && (
-        <div className="mb-2 rounded-md bg-red-50 px-3 py-2 text-left text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
-          {error}
-        </div>
-      )}
-
-      {replyMessage && (
-        <div className="mb-2 flex items-center justify-between rounded-md border-l-4 border-blue-500 bg-blue-50 px-3 py-2 text-left dark:bg-blue-950/30">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-blue-700 dark:text-blue-200">
-              Replying to {replyMessage.sender?.name || "message"}
-            </div>
-            <div className="truncate text-sm text-gray-700 dark:text-slate-300">
-              {getReplyLabel(replyMessage)}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setReplyMessage(null)}
-            className="ml-3 rounded-full p-1 text-gray-500 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
-            title="Cancel reply"
-            aria-label="Cancel reply"
-          >
-            <FiX />
-          </button>
-        </div>
-      )}
-
-      {attachments.length > 0 && (
-        <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
-          {attachments.map((attachment, index) => (
-            <div
-              key={`${attachment.name}-${index}`}
-              className="relative flex h-20 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-gray-50 text-xs text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-            >
-              {attachment.mimeType.startsWith("image/") ? (
-                <img
-                  src={attachment.url}
-                  alt={attachment.name}
-                  className="h-full w-full object-cover"
-                />
-              ) : attachment.mimeType.startsWith("audio/") ? (
-                <span className="px-2 text-center">Voice note</span>
-              ) : (
-                <span className="px-2 text-center">
-                  {attachment.name}
-                </span>
-              )}
-
-              <button
-                type="button"
-                onClick={() => removeAttachment(index)}
-                className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white"
-                title="Remove attachment"
-                aria-label="Remove attachment"
-              >
-                <FiX size={12} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {showEmojiPicker && (
-        <div className="mb-2 grid w-fit grid-cols-8 gap-1 rounded-md border bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-          {EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => setMessage((prev) => `${prev}${emoji}`)}
-              className="h-8 w-8 rounded hover:bg-gray-100 dark:hover:bg-slate-800"
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center gap-1.5 sm:gap-2">
-        <button
-          type="button"
-          onClick={() => setShowEmojiPicker((prev) => !prev)}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
-          title="Emoji"
-          aria-label="Emoji"
-        >
-          <FiSmile />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
-          title="Attach file"
-          aria-label="Attach file"
-        >
-          <FiPaperclip />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => imageInputRef.current?.click()}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
-          title="Attach image"
-          aria-label="Attach image"
-        >
-          <FiImage />
-        </button>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          onChange={handleFiles}
-          className="hidden"
-        />
-
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handleFiles}
-          className="hidden"
-        />
-
-        <input
-          type="text"
-          placeholder="Type a message..."
-          className="min-w-0 flex-1 rounded-full border border-gray-300 px-4 py-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          value={message}
-          onChange={handleTyping}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              handleSend();
-            }
-          }}
-        />
-
-        <button
-          type="button"
-          onClick={isRecording ? stopRecording : startRecording}
-          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-            isRecording
-              ? "bg-red-100 text-red-600"
-              : "text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
-          }`}
-          title={isRecording ? "Stop recording" : "Record voice note"}
-          aria-label={
-            isRecording ? "Stop recording" : "Record voice note"
-          }
-        >
-          {isRecording ? <FiStopCircle /> : <FiMic />}
-        </button>
-
-        <button
-          type="button"
-          onClick={handleSend}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700"
-          title="Send"
-          aria-label="Send"
-        >
-          <FiSend />
-        </button>
+    <div className="mb-2 flex items-center gap-3 rounded-xl border-l-4 border-brand bg-soft py-2 pl-3 pr-1">
+      <Icon className="shrink-0 text-brand" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-brand">{title}</p>
+        <p className="truncate text-sm text-muted">{text}</p>
       </div>
+      <IconButton label="Cancel" onClick={onCancel} className="h-8 w-8">
+        <FiX />
+      </IconButton>
     </div>
   );
 }
+
+function FilePreview({ file, onRemove }) {
+  const image = file.mimeType.startsWith("image/");
+  const video = file.mimeType.startsWith("video/");
+
+  return (
+    <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-line bg-soft">
+      {image ? (
+        <img
+          src={file.previewUrl}
+          alt={file.name}
+          className="h-full w-full object-cover"
+        />
+      ) : video ? (
+        <video src={file.previewUrl} muted className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full flex-col items-center justify-center gap-1 p-1.5 text-center text-muted">
+          <FiFile className="text-lg" />
+          <span className="w-full truncate text-[10px]">{file.name}</span>
+          <span className="text-[10px]">{formatBytes(file.size)}</span>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-xs text-white"
+        aria-label={`Remove ${file.name}`}
+      >
+        <FiX />
+      </button>
+    </div>
+  );
+}
+
+const MessageInput = forwardRef(function MessageInput({ chat }, ref) {
+  const { user } = useAuth();
+  const { toastError } = useToast();
+  const {
+    me,
+    sendMessage,
+    saveEdit,
+    replyTo,
+    setReplyTo,
+    editing,
+    setEditing,
+    setBlocked,
+  } = useChat();
+  const chatId = chat._id;
+
+  const [text, setText] = useState(() => drafts.get(chatId) || "");
+  const [files, setFiles] = useState([]);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachMenu, setAttachMenu] = useState(null);
+  const [recording, setRecording] = useState(null); // { seconds }
+
+  const textareaRef = useRef(null);
+  const mediaInputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const recorderRef = useRef(null);
+  const typingRef = useRef({ active: false, timer: null, lastSent: 0 });
+
+  const other = chat.isGroupChat ? null : otherUserOf(chat, me);
+  const blockedByMe = other && user.blockedUsers?.includes(other._id);
+
+  /* ------------------------------- typing --------------------------------- */
+
+  const stopTyping = () => {
+    const state = typingRef.current;
+    clearTimeout(state.timer);
+    if (state.active) {
+      state.active = false;
+      socket.emit("typing", { chatId, typing: false });
+    }
+  };
+
+  const noteTyping = () => {
+    const state = typingRef.current;
+    const now = Date.now();
+    // Re-announce every few seconds so the indicator survives long messages.
+    if (!state.active || now - state.lastSent > 3000) {
+      state.active = true;
+      state.lastSent = now;
+      socket.emit("typing", { chatId, typing: true });
+    }
+    clearTimeout(state.timer);
+    state.timer = setTimeout(stopTyping, TYPING_IDLE_MS);
+  };
+
+  useEffect(() => {
+    const state = typingRef.current;
+    return () => {
+      clearTimeout(state.timer);
+      if (state.active) socket.emit("typing", { chatId, typing: false });
+      recorderRef.current?.cancel();
+    };
+  }, [chatId]);
+
+  /* -------------------------------- text ---------------------------------- */
+
+  const changeText = (value) => {
+    setText(value);
+    if (!editing) drafts.set(chatId, value);
+    if (value.trim()) noteTyping();
+    else stopTyping();
+  };
+
+  // Grow the textarea with its content, up to a limit.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+  }, [text, recording]);
+
+  // Entering edit mode loads the message into the box; leaving it
+  // restores whatever draft was there before.
+  const [editingId, setEditingId] = useState(null);
+  if ((editing?._id || null) !== editingId) {
+    setEditingId(editing?._id || null);
+    setText(editing ? editing.content : drafts.get(chatId) || "");
+    if (editing) setFiles([]);
+  }
+
+  useEffect(() => {
+    if (!isTouch() || replyTo || editing) textareaRef.current?.focus();
+  }, [chatId, replyTo, editing]);
+
+  const insertEmoji = (emoji) => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? text.length;
+    const end = textarea?.selectionEnd ?? text.length;
+    changeText(text.slice(0, start) + emoji + text.slice(end));
+
+    requestAnimationFrame(() => {
+      if (!textarea) return;
+      const caret = start + emoji.length;
+      textarea.setSelectionRange(caret, caret);
+      if (!isTouch()) textarea.focus();
+    });
+  };
+
+  /* -------------------------------- files --------------------------------- */
+
+  const addFiles = async (picked) => {
+    const list = Array.from(picked || []);
+    if (list.length === 0 || editing) return;
+
+    const tooBig = list.find((file) => file.size > MAX_FILE_BYTES);
+    if (tooBig) {
+      toastError(`"${tooBig.name}" is larger than 25 MB.`);
+      return;
+    }
+    if (files.length + list.length > MAX_FILES) {
+      toastError(`You can send up to ${MAX_FILES} files at once.`);
+      return;
+    }
+
+    const prepared = await Promise.all(list.map(prepareAttachment));
+    setFiles((current) => [...current, ...prepared]);
+    textareaRef.current?.focus();
+  };
+
+  useImperativeHandle(ref, () => ({ addFiles }));
+
+  const onPick = (event) => {
+    addFiles(event.target.files);
+    event.target.value = "";
+  };
+
+  const onPaste = (event) => {
+    const pasted = Array.from(event.clipboardData?.files || []);
+    if (pasted.length > 0) {
+      event.preventDefault();
+      addFiles(pasted);
+    }
+  };
+
+  /* ------------------------------- sending -------------------------------- */
+
+  const send = async () => {
+    const content = text.trim();
+
+    if (editing) {
+      if (!content && !editing.attachments?.length) return;
+      if (content === editing.content || (await saveEdit(editing, content))) {
+        setEditing(null);
+      }
+      return;
+    }
+
+    if (!content && files.length === 0) return;
+
+    if (files.length === 0) {
+      sendMessage(chatId, { content, reply: replyTo });
+    } else {
+      // Each file is its own message; the text becomes the first caption.
+      files.forEach((file, index) => {
+        sendMessage(chatId, {
+          content: index === 0 ? content : "",
+          files: [file],
+          reply: index === 0 ? replyTo : null,
+        });
+      });
+    }
+
+    stopTyping();
+    setText("");
+    setFiles([]);
+    setReplyTo(null);
+    setEmojiOpen(false);
+    drafts.delete(chatId);
+    if (!isTouch()) textareaRef.current?.focus();
+  };
+
+  const onKeyDown = (event) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
+      !isTouch()
+    ) {
+      event.preventDefault();
+      send();
+    }
+    if (event.key === "Escape") {
+      if (emojiOpen) setEmojiOpen(false);
+      else if (editing) setEditing(null);
+      else if (replyTo) setReplyTo(null);
+    }
+  };
+
+  /* ------------------------------ voice notes ----------------------------- */
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      toastError("Voice messages aren't supported in this browser.");
+      return;
+    }
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toastError("Allow microphone access to record a voice message.");
+      return;
+    }
+
+    const mimeType = pickRecorderMimeType();
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    const chunks = [];
+    const startedAt = Date.now();
+    let cancelled = false;
+    const reply = replyTo;
+
+    const timer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      setRecording({ seconds });
+      if (seconds >= 600) recorder.stop();
+    }, 250);
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
+    recorder.onstop = () => {
+      clearInterval(timer);
+      stream.getTracks().forEach((track) => track.stop());
+      recorderRef.current = null;
+      setRecording(null);
+
+      const duration = (Date.now() - startedAt) / 1000;
+      if (cancelled || duration < 0.6 || chunks.length === 0) return;
+
+      const type = (recorder.mimeType || mimeType || "audio/webm").split(";")[0];
+      const blob = new Blob(chunks, { type });
+      sendMessage(chatId, {
+        files: [
+          {
+            blob,
+            name: `voice-message.${type.includes("mp4") ? "m4a" : type.split("/")[1]}`,
+            mimeType: type,
+            size: blob.size,
+            duration,
+            previewUrl: URL.createObjectURL(blob),
+          },
+        ],
+        voice: true,
+        reply,
+      });
+      setReplyTo(null);
+    };
+
+    recorderRef.current = {
+      finish: () => recorder.state !== "inactive" && recorder.stop(),
+      cancel: () => {
+        cancelled = true;
+        if (recorder.state !== "inactive") recorder.stop();
+      },
+    };
+    recorder.start();
+    setRecording({ seconds: 0 });
+  };
+
+  /* -------------------------------- render -------------------------------- */
+
+  if (blockedByMe || chat.blockedByOther) {
+    return (
+      <div className="border-t border-line bg-panel px-4 py-3.5 text-center text-sm text-muted">
+        {blockedByMe ? (
+          <>
+            You blocked {other.name}.{" "}
+            <button
+              type="button"
+              className="font-semibold text-brand hover:underline"
+              onClick={() => setBlocked(other._id, false)}
+            >
+              Unblock
+            </button>{" "}
+            to send a message.
+          </>
+        ) : (
+          "You can't send messages to this contact."
+        )}
+      </div>
+    );
+  }
+
+  const canSend = editing
+    ? text.trim().length > 0 || editing.attachments?.length > 0
+    : text.trim().length > 0 || files.length > 0;
+
+  return (
+    <div className="relative border-t border-line bg-panel px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-3">
+      {emojiOpen && (
+        <div className="absolute bottom-full left-2 right-2 z-20 mb-2 animate-pop sm:right-auto sm:w-96">
+          <EmojiPicker onSelect={insertEmoji} />
+        </div>
+      )}
+
+      {editing && (
+        <ContextBar
+          icon={FiEdit2}
+          title="Edit message"
+          text={messagePreview(editing, me)}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+      {replyTo && !editing && (
+        <ContextBar
+          icon={FiCornerUpLeft}
+          title={`Replying to ${senderId(replyTo) === me ? "yourself" : replyTo.sender?.name || "message"}`}
+          text={messagePreview(replyTo, me)}
+          onCancel={() => setReplyTo(null)}
+        />
+      )}
+
+      {files.length > 0 && (
+        <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+          {files.map((file, index) => (
+            <FilePreview
+              key={file.previewUrl}
+              file={file}
+              onRemove={() =>
+                setFiles((current) => current.filter((_, position) => position !== index))
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {recording ? (
+        <div className="flex items-center gap-2">
+          <IconButton
+            label="Discard recording"
+            className="text-danger"
+            onClick={() => recorderRef.current?.cancel()}
+          >
+            <FiTrash2 />
+          </IconButton>
+          <div className="flex flex-1 items-center gap-3 rounded-full bg-soft px-4 py-2.5 text-sm text-ink">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-danger" />
+            <span className="tabular-nums">{formatDuration(recording.seconds)}</span>
+            <span className="truncate text-muted">Recording voice message…</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => recorderRef.current?.finish()}
+            aria-label="Send voice message"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand text-lg text-white hover:bg-brand-strong"
+          >
+            <FiSend />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-end gap-1">
+          <IconButton
+            label="Emoji"
+            active={emojiOpen}
+            onClick={() => setEmojiOpen((open) => !open)}
+            className="mb-0.5"
+          >
+            <FiSmile />
+          </IconButton>
+          {!editing && (
+            <IconButton
+              label="Attach"
+              className="mb-0.5"
+              onClick={(event) =>
+                setAttachMenu(event.currentTarget.getBoundingClientRect())
+              }
+            >
+              <FiPaperclip />
+            </IconButton>
+          )}
+
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={text}
+            onChange={(event) => changeText(event.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            placeholder={files.length > 0 ? "Add a caption" : "Type a message"}
+            aria-label="Message"
+            maxLength={5000}
+            dir="auto"
+            className="mx-1 max-h-36 min-h-11 min-w-0 flex-1 resize-none rounded-3xl bg-soft px-4 py-2.5 text-[15px] leading-6 text-ink outline-none placeholder:text-faint focus:ring-2 focus:ring-brand/25"
+          />
+
+          {canSend || editing ? (
+            <button
+              type="button"
+              onClick={send}
+              disabled={!canSend}
+              aria-label={editing ? "Save edit" : "Send"}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand text-lg text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
+            >
+              <FiSend className="-translate-x-px translate-y-px" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={startRecording}
+              aria-label="Record voice message"
+              title="Record voice message"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand text-lg text-white transition-colors hover:bg-brand-strong"
+            >
+              <FiMic />
+            </button>
+          )}
+        </div>
+      )}
+
+      <input
+        ref={mediaInputRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        hidden
+        onChange={onPick}
+      />
+      <input ref={fileInputRef} type="file" multiple hidden onChange={onPick} />
+
+      {attachMenu && (
+        <Menu
+          anchorRect={attachMenu}
+          align="left"
+          onClose={() => setAttachMenu(null)}
+          items={[
+            {
+              label: "Photos & videos",
+              icon: FiImage,
+              onClick: () => mediaInputRef.current?.click(),
+            },
+            {
+              label: "Document",
+              icon: FiFile,
+              onClick: () => fileInputRef.current?.click(),
+            },
+          ]}
+        />
+      )}
+    </div>
+  );
+});
 
 export default MessageInput;

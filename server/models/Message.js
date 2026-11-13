@@ -1,89 +1,78 @@
 const mongoose = require("mongoose");
 
-const messageSchema = mongoose.Schema(
+const userRef = { type: mongoose.Schema.Types.ObjectId, ref: "User" };
+
+const attachmentSchema = new mongoose.Schema(
   {
-    sender: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
+    url: { type: String, required: true },
+    name: { type: String, default: "Attachment" },
+    mimeType: { type: String, default: "application/octet-stream" },
+    size: { type: Number, default: 0 },
+    duration: Number,
+    width: Number,
+    height: Number,
+  },
+  { _id: false }
+);
 
-    content: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-
+const messageSchema = new mongoose.Schema(
+  {
+    sender: userRef,
+    chat: { type: mongoose.Schema.Types.ObjectId, ref: "Chat" },
+    content: { type: String, trim: true, default: "" },
     messageType: {
       type: String,
-      enum: ["text", "image", "file", "voice"],
+      enum: [
+        "text",
+        "image",
+        "video",
+        "audio",
+        "voice",
+        "file",
+        "system",
+        "call",
+      ],
       default: "text",
     },
+    attachments: [attachmentSchema],
+    replyTo: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
+    forwarded: { type: Boolean, default: false },
 
-    chat: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Chat",
-    },
-
-    attachments: [
+    reactions: [
       {
-        url: {
-          type: String,
-          required: true,
-        },
-        name: {
-          type: String,
-          default: "Attachment",
-        },
-        mimeType: {
-          type: String,
-          default: "application/octet-stream",
-        },
-        size: {
-          type: Number,
-          default: 0,
-        },
+        _id: false,
+        user: userRef,
+        emoji: { type: String, maxlength: 16 },
       },
     ],
+    starredBy: [userRef],
 
-    replyTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Message",
+    // Group events ("Ali added Sara"). `sender` is the actor.
+    system: {
+      kind: String,
+      targets: [userRef],
+      text: String,
+    },
+    // Call log entries. `sender` is the caller.
+    call: {
+      video: Boolean,
+      status: { type: String, enum: ["completed", "missed", "declined"] },
+      duration: Number,
     },
 
-    delivered: {
-      type: Boolean,
-      default: false,
-    },
+    edited: { type: Boolean, default: false },
+    editedAt: Date,
+    deletedForEveryone: { type: Boolean, default: false },
+    deletedFor: [userRef],
 
-    read: {
-      type: Boolean,
-      default: false,
-    },
-
-    deletedForEveryone: {
-      type: Boolean,
-      default: false,
-    },
-
-    edited: {
-      type: Boolean,
-      default: false,
-    },
-
-    editedAt: {
-      type: Date,
-    },
-
-    deletedFor: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-    ],
+    // Legacy per-message receipt flags from before per-user watermarks.
+    delivered: { type: Boolean, default: false },
+    read: { type: Boolean, default: false },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
+
+messageSchema.index({ chat: 1, createdAt: -1 });
+messageSchema.index({ starredBy: 1 });
 
 module.exports = mongoose.model("Message", messageSchema);

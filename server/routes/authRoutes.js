@@ -1,21 +1,17 @@
 const express = require("express");
-const router = express.Router();
 const protect = require("../middleware/authMiddleware");
-
 const {
   registerUser,
   loginUser,
-  getProfile,
+  getMe,
+  changePassword,
 } = require("../controllers/authController");
+
+const router = express.Router();
 
 router.post("/register", registerUser);
 router.post("/login", loginUser);
-router.get("/profile", protect, getProfile);
-
-
-router.get("/test", (req, res) => {
-  res.json({ message: "Auth route working" });
-});
-
+router.get("/me", protect, getMe);
+router.put("/password", protect, changePassword);
 
 module.exports = router;

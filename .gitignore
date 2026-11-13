@@ -28,3 +28,11 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local development database
+server/.data/
+
+# Example env files are safe to commit
+!.env.example
+!server/.env.example
+!client/.env.example

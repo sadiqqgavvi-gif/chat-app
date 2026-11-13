@@ -1,41 +1,8 @@
-import api from "./api";
+import api from "../lib/api";
 
-export const searchUsers = async (search, token) => {
-  return api.get(`/user?search=${encodeURIComponent(search)}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-};
-
-export const updateProfile = async (profile, token) => {
-  return api.put("/user/profile", profile, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-};
-
-export const blockUser = async (userId, token) => {
-  return api.put(
-    "/user/block",
-    { userId },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-};
-
-export const unblockUser = async (userId, token) => {
-  return api.put(
-    "/user/unblock",
-    { userId },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-};
+export const searchUsers = (search = "", signal) =>
+  api.get("/user", { params: { search }, signal });
+export const updateProfile = (profile) => api.put("/user/profile", profile);
+export const blockUser = (userId) => api.put("/user/block", { userId });
+export const unblockUser = (userId) => api.put("/user/unblock", { userId });
+export const fetchBlockedUsers = () => api.get("/user/blocked");
