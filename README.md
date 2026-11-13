@@ -1,131 +1,150 @@
 # Chat App
 
-A real-time messaging application built with the MERN stack and Socket.io — supporting one-on-one and group chats, live typing indicators, read receipts, media attachments, and more.
+A real-time messaging web app built with the MERN stack and Socket.io: one-to-one and group chats, read receipts, media and voice messages, reactions, and voice/video calls.
 
 ![Chat App](docs/screenshots/02-chat-window.png)
 
 ## Features
 
-- **Real-time messaging** via Socket.io — instant delivery, no refresh needed
-- **One-on-one and group chats**, with group admin controls (rename, add/remove members)
-- **Typing indicators** and **online presence** (see who's online)
-- **Read receipts** — single check (sent), double check (delivered), colored double check (read)
-- **Message actions** — reply, copy, edit, delete for me, delete for everyone
-- **Attachments** — images, files, and voice notes (recorded directly in-browser)
-- **Block / unblock users** in direct chats
-- **Unread message counts** per chat
-- **Dark mode** with persisted theme preference
-- **JWT authentication** with protected routes
+**Messaging**
 
-## Tech Stack
+- Real-time delivery with Socket.io, with optimistic sending, retry on failure and automatic resync after a reconnect
+- Sent / delivered / read ticks, in direct chats and groups, plus a per-message "Message info" view
+- Reply, forward, edit, copy, star, react with any emoji, delete for me / for everyone
+- Photos, videos, documents (up to 25 MB) with upload progress, captions, drag & drop and paste
+- Voice messages recorded in the browser, with seek and playback speed
+- Typing indicators, online status and "last seen"
+- Clickable links and `*bold*`, `_italic_`, `~strikethrough~`, `` `code` `` formatting
+- Search inside a chat and jump to the result; infinite scroll through history
+- Day separators, unread divider, scroll-to-latest button
 
-**Frontend**
+**Chats**
 
-- React 19 + Vite
-- Tailwind CSS 4
-- React Router
-- Socket.io Client
-- Axios
+- Pin, archive, mute, mark as unread, clear and delete chats
+- Unread counts, All / Unread / Groups filters, search for chats and people
+- Starred messages list, shared media and files per chat
+- Block / unblock contacts
 
-**Backend**
+**Groups**
 
-- Node.js + Express 5
-- MongoDB + Mongoose
-- Socket.io
-- JWT (jsonwebtoken) + bcrypt for auth
+- Create groups with a name, icon and description
+- Multiple admins: add / remove members, promote / dismiss admins, edit group info
+- Group events in the timeline ("Sara added Ali"); new members don't see older history
+
+**Calls**
+
+- One-to-one voice and video calls (WebRTC) with mute / camera toggles
+- Missed, declined and completed calls are logged in the chat
+
+**App**
+
+- Responsive layout: two-pane on desktop, single-pane with back navigation on phones
+- Light, dark and system themes
+- Sound and desktop notifications, unread count in the tab title
+- Profile photo, name and about; change password
+- JWT auth, rate-limited login, authenticated sockets, validated input
 
 ## Screenshots
 
-| Login                                   | Chat Window                                         |
-| --------------------------------------- | --------------------------------------------------- |
-| ![Login](docs/screenshots/01-login.png) | ![Chat Window](docs/screenshots/02-chat-window.png) |
+| Sign in | Group info |
+| --- | --- |
+| ![Sign in](docs/screenshots/01-login.png) | ![Group info](docs/screenshots/03-group-info.png) |
 
-| Profile Settings                                              | Chat Options (Dark Mode)                                        |
-| ------------------------------------------------------------- | --------------------------------------------------------------- |
-| ![Profile Settings](docs/screenshots/03-profile-settings.png) | ![Chat Options Menu](docs/screenshots/04-chat-options-menu.png) |
+| Dark mode and message menu | Video call |
+| --- | --- |
+| ![Dark mode](docs/screenshots/04-dark-mode-message-menu.png) | ![Video call](docs/screenshots/05-video-call.png) |
+
+| Mobile: chat list | Mobile: chat |
+| --- | --- |
+| <img src="docs/screenshots/06-mobile-chat-list.png" width="300" alt="Mobile chat list" /> | <img src="docs/screenshots/07-mobile-chat.png" width="300" alt="Mobile chat" /> |
+
+## Tech Stack
+
+- **Frontend:** React 19, Vite, Tailwind CSS 4, React Router, Socket.io client, Axios
+- **Backend:** Node.js, Express 5, MongoDB + Mongoose, Socket.io, JWT + bcrypt
+- **Files:** stored in MongoDB GridFS, so uploads survive redeploys without an extra storage service
+- **Calls:** WebRTC, with Socket.io for signalling
 
 ## Project Structure
 
 ```
 chat-app/
-├── client/          # React + Vite frontend
+├── client/                # React + Vite frontend
 │   └── src/
-│       ├── components/   # Chat UI, layout, shared components
-│       ├── context/      # Auth and Chat context providers
-│       ├── pages/        # Login, Register, Home
-│       └── services/     # API service layer (axios)
-├── server/          # Express + Socket.io backend
-│   ├── controllers/      # Route handlers
+│       ├── components/    # chat/, sidebar/, call/, ui/
+│       ├── context/       # Auth, Theme, Toast, Chat (realtime state) and Call providers
+│       ├── lib/           # API client, socket, formatting, media and notification helpers
+│       ├── pages/         # Login, Register, Home
+│       └── services/      # One function per API endpoint
+├── server/                # Express + Socket.io backend
+│   ├── controllers/       # Route handlers
 │   ├── models/            # Mongoose schemas (User, Chat, Message)
 │   ├── routes/            # Express routers
-│   └── middleware/        # JWT auth middleware
-└── docs/            # Additional documentation / assets
+│   ├── middleware/        # JWT auth, error handling
+│   ├── utils/             # Realtime hub, message creation, serializers, migration
+│   └── test/              # End-to-end API tests
+└── docs/screenshots/
 ```
 
 ## Getting Started
 
-### Prerequisites
+You need Node.js 20.19 or newer.
 
-- Node.js 20+
-- MongoDB instance (local or Atlas)
-
-### 1. Clone the repo
+### 1. Install
 
 ```bash
 git clone https://github.com/sadiqqgavvi-gif/chat-app.git
 cd chat-app
+npm run install:all
 ```
 
-### 2. Set up the server
+### 2. Run the server
 
 ```bash
-cd server
-npm install
+npm run dev:server
 ```
 
-Create a `.env` file in `server/`:
+With no configuration the server starts a local MongoDB for you and keeps its data in `server/.data` (the first start downloads MongoDB, about 80 MB). To use your own database, copy `server/.env.example` to `server/.env` and set `MONGO_URI` and `JWT_SECRET`.
 
-```env
-MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_jwt_secret
-PORT=5000
-CLIENT_URL=http://localhost:5173
-```
-
-Run the server:
+### 3. Run the client
 
 ```bash
-npm run dev
+npm run dev:client
 ```
 
-### 3. Set up the client
+Open `http://localhost:5173`. Vite proxies `/api` and the websocket to the server on port 5000, so the client needs no environment variables in development.
+
+To try a conversation, register two accounts in two different browsers (or one normal and one private window).
+
+### Tests
 
 ```bash
-cd ../client
-npm install
+npm test
 ```
 
-Create a `.env` file in `client/`:
+Boots the real server against a throwaway MongoDB and exercises auth, messaging, receipts, groups, uploads and call signalling over HTTP and Socket.io.
 
-```env
-VITE_API_URL=http://localhost:5000/api
-VITE_SOCKET_URL=http://localhost:5000
-```
+## Deployment
 
-Run the client:
+Set `NODE_ENV=production`, `MONGO_URI` and `JWT_SECRET` on the server in every setup.
+
+**One service (simplest).** The server serves the built client when `client/dist` exists. The root `Dockerfile` does this in one image:
 
 ```bash
-npm run dev
+docker build -t chat-app .
 ```
 
-The app will be available at `http://localhost:5173`.
+```bash
+docker run -p 5000:5000 -e MONGO_URI=... -e JWT_SECRET=... chat-app
+```
 
-## Live Demo
+**Client and API on different hosts** (for example Vercel + Back4app). Deploy `server/` with `server/Dockerfile` and set `CLIENT_URL` to the client's origin. Build the client with `VITE_API_URL` and `VITE_SOCKET_URL` pointing at the API (see `client/.env.example`).
 
-<!-- Once deployed, replace this line with your live URL, e.g.: -->
-<!-- 🔗 [Try it live](https://your-deployed-app.vercel.app) -->
+**Calls** need HTTPS in production (browsers only allow camera and microphone on secure origins). The default STUN server is enough on most networks; for users behind strict firewalls add a TURN server through `VITE_ICE_SERVERS`.
 
-_Live demo coming soon._
+## Upgrading from the earlier version
+
+Existing data is upgraded automatically on the first start: read receipts move to the new format and each group's admin becomes its first admin. Attachments that were stored inline in old messages keep working.
 
 ## License
 

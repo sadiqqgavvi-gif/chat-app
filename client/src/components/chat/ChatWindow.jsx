@@ -1,580 +1,462 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  FiArrowLeft,
+  FiBell,
+  FiBellOff,
+  FiCopy,
+  FiCornerUpLeft,
+  FiCornerUpRight,
+  FiDownload,
+  FiEdit2,
+  FiInfo,
+  FiLogOut,
   FiMoreVertical,
-  FiMoon,
-  FiPlus,
-  FiSettings,
+  FiPhone,
+  FiSearch,
   FiSlash,
-  FiSun,
+  FiSmile,
+  FiStar,
   FiTrash2,
-  FiUserMinus,
+  FiUploadCloud,
+  FiUser,
   FiUsers,
-  FiX,
+  FiVideo,
+  FiXCircle,
 } from "react-icons/fi";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
-import { useChat } from "../../context/useChat";
-import { useAuth } from "../../context/useAuth";
-import { useTheme } from "../../context/useTheme";
+import ChatInfoPanel from "./ChatInfoPanel";
+import SearchPanel from "./SearchPanel";
+import Lightbox from "./Lightbox";
 import {
-  blockUser,
-  searchUsers,
-  unblockUser,
-} from "../../services/userService";
-import {
-  addUserToGroup,
-  removeUserFromGroup,
-  renameGroupChat,
-} from "../../services/chatService";
-import { clearChat } from "../../services/messageService";
-import socket from "../../socket";
+  DeleteMessageDialog,
+  ForwardDialog,
+  MessageInfoDialog,
+  ReactionPopover,
+} from "./MessageDialogs";
+import Avatar from "../ui/Avatar";
+import IconButton from "../ui/IconButton";
+import Menu from "../ui/Menu";
+import { useChatConfirm } from "./useChatConfirm";
+import { useAuth, useCall, useChat, useToast } from "../../context/contexts";
+import { fileUrl } from "../../lib/api";
+import { chatTitle, formatLastSeen, otherUserOf, senderId } from "../../lib/format";
 
-function getInitials(name = "") {
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
-}
+const toLightboxItem = (message, me) => {
+  const attachment = message.attachments[0];
+  return {
+    id: message._id,
+    url: attachment.localUrl || fileUrl(attachment.url),
+    downloadUrl: attachment.url ? fileUrl(attachment.url, { download: true }) : null,
+    name: attachment.name,
+    video: attachment.mimeType.startsWith("video/"),
+    caption: message.content,
+    sender: senderId(message) === me ? "You" : message.sender?.name || "",
+    createdAt: message.createdAt,
+  };
+};
 
-function hasBlocked(user, userId) {
-  return user?.blockedUsers?.some(
-    (blockedId) =>
-      (blockedId._id || blockedId).toString() === userId?.toString()
-  );
-}
+const isMediaMessage = (message) =>
+  !message.deletedForEveryone && ["image", "video"].includes(message.messageType);
 
 function ChatWindow() {
+  const { user } = useAuth();
+  const { toast, toastError } = useToast();
+  const { startCall } = useCall();
   const {
-    selectedChat,
-    setSelectedChat,
-    setChats,
-    setMessages,
-    setReplyMessage,
-    isTyping,
-    setIsTyping,
+    me,
+    selectedChat: chat,
+    thread,
+    onlineIds,
+    typing,
+    closeChat,
+    setReplyTo,
+    setEditing,
+    reactTo,
+    toggleStar,
+    jumpToMessage,
+    retryMessage,
+    discardMessage,
+    setPrefs,
+    setBlocked,
   } = useChat();
 
-  const { user, token, updateUser } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  const menuRef = useRef(null);
+  const inputRef = useRef(null);
+  const dragDepth = useRef(0);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [groupName, setGroupName] = useState("");
-  const [memberSearch, setMemberSearch] = useState("");
-  const [memberResults, setMemberResults] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [sidePanel, setSidePanel] = useState(null); // "info" | "search"
+  const [headerMenu, setHeaderMenu] = useState(null);
+  const [messageMenu, setMessageMenu] = useState(null);
+  const [reactionFor, setReactionFor] = useState(null);
+  const [dialog, setDialog] = useState(null); // { type, message }
+  const [lightbox, setLightbox] = useState(null);
+  const [askConfirm, confirmDialog] = useChatConfirm();
+  const [dragging, setDragging] = useState(false);
 
-  useEffect(() => {
-    if (!selectedChat) return;
+  const isGroup = chat.isGroupChat;
+  const other = isGroup ? null : otherUserOf(chat, me);
+  const title = chatTitle(chat, me);
+  const blockedByMe = other && user.blockedUsers?.includes(other._id);
+  const canCall = other && !blockedByMe && !chat.blockedByOther;
 
-    socket.emit("join chat", selectedChat._id);
-
-    socket.off("typing");
-    socket.off("stop typing");
-
-    socket.on("typing", () => {
-      setIsTyping(true);
-    });
-
-    socket.on("stop typing", () => {
-      setIsTyping(false);
-    });
-
-    return () => {
-      socket.off("typing");
-      socket.off("stop typing");
-      setIsTyping(false);
-    };
-  }, [selectedChat, setIsTyping]);
-
-  useEffect(() => {
-    const handleDismiss = (event) => {
-      if (!menuRef.current?.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    };
-
-    window.addEventListener("mousedown", handleDismiss);
-
-    return () => {
-      window.removeEventListener("mousedown", handleDismiss);
-    };
-  }, []);
-
-  if (!selectedChat) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-gray-900 text-gray-400 dark:bg-slate-950 dark:text-slate-500">
-        Select a chat to start messaging
-      </div>
-    );
+  const typingIds = typing[chat._id] || [];
+  let subtitle;
+  if (typingIds.length > 0) {
+    const name = chat.users
+      .find((item) => item._id === typingIds[0])
+      ?.name?.split(" ")[0];
+    subtitle = isGroup ? `${name || "Someone"} is typing…` : "typing…";
+  } else if (isGroup) {
+    subtitle = chat.users
+      .map((item) => (item._id === me ? "You" : item.name.split(" ")[0]))
+      .join(", ");
+  } else if (blockedByMe || chat.blockedByOther) {
+    subtitle = "";
+  } else {
+    subtitle = onlineIds.has(other?._id) ? "online" : formatLastSeen(other?.lastSeen);
   }
 
-  const otherUser = selectedChat.users.find(
-    (currentUser) => currentUser._id !== user.id
-  );
-  const isGroup = selectedChat.isGroupChat;
-  const title = isGroup
-    ? selectedChat.chatName
-    : otherUser?.name || "Chat";
-  const subtitle = isGroup
-    ? `${selectedChat.users.length} members`
-    : otherUser?.email || "";
-  const isAdmin = selectedChat.groupAdmin?._id === user.id;
-  const blockedByMe = !isGroup && hasBlocked(user, otherUser?._id);
+  /* ---------------------------- message actions --------------------------- */
 
-  const openGroupSettings = () => {
-    setGroupName(selectedChat.chatName || "");
-    setError("");
-    setMemberSearch("");
-    setMemberResults([]);
-    setMenuOpen(false);
-    setSettingsOpen(true);
-  };
+  // Read through a ref so the callbacks handed to every bubble stay stable.
+  const messagesRef = useRef(thread.messages);
+  useEffect(() => {
+    messagesRef.current = thread.messages;
+  });
 
-  const syncUpdatedChat = (updatedChat) => {
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat._id === updatedChat._id
-          ? {
-              ...chat,
-              ...updatedChat,
-            }
-          : chat
-      )
-    );
-    setSelectedChat(updatedChat);
-  };
-
-  const handleClearChat = async () => {
-    const confirmed = window.confirm(
-      "Clear all messages in this chat for you?"
-    );
-
-    if (!confirmed) {
-      setMenuOpen(false);
-      return;
-    }
-
-    try {
-      setSaving(true);
-      setError("");
-      setMenuOpen(false);
-
-      await clearChat(selectedChat._id, token);
-
-      setMessages([]);
-      setReplyMessage(null);
-      setChats((prev) =>
-        prev.map((chat) =>
-          chat._id === selectedChat._id
-            ? {
-                ...chat,
-                latestMessage: null,
-                unreadCount: 0,
-              }
-            : chat
-        )
-      );
-      setSelectedChat({
-        ...selectedChat,
-        latestMessage: null,
-        unreadCount: 0,
-      });
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Could not clear chat."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleBlockToggle = async () => {
-    if (!otherUser) return;
-
-    try {
-      setSaving(true);
-      setError("");
-      setMenuOpen(false);
-
-      const response = blockedByMe
-        ? await unblockUser(otherUser._id, token)
-        : await blockUser(otherUser._id, token);
-
-      updateUser(response.data);
-      setReplyMessage(null);
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Could not update block status."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSearchMembers = async (value) => {
-    setMemberSearch(value);
-    setError("");
-
-    if (!value.trim()) {
-      setMemberResults([]);
-      return;
-    }
-
-    try {
-      const response = await searchUsers(value, token);
-      const existingMemberIds = new Set(
-        selectedChat.users.map((member) => member._id)
-      );
-
-      setMemberResults(
-        response.data.filter(
-          (candidate) => !existingMemberIds.has(candidate._id)
-        )
-      );
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Could not search users."
-      );
-    }
-  };
-
-  const handleRename = async () => {
-    if (!groupName.trim()) {
-      setError("Group name is required.");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      setError("");
-
-      const response = await renameGroupChat(
-        selectedChat._id,
-        groupName,
-        token
-      );
-
-      syncUpdatedChat(response.data);
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Could not rename group."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAddMember = async (memberId) => {
-    try {
-      setSaving(true);
-      setError("");
-
-      const response = await addUserToGroup(
-        selectedChat._id,
-        memberId,
-        token
-      );
-
-      syncUpdatedChat(response.data);
-      setMemberSearch("");
-      setMemberResults([]);
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Could not add member."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveMember = async (memberId) => {
-    try {
-      setSaving(true);
-      setError("");
-
-      const response = await removeUserFromGroup(
-        selectedChat._id,
-        memberId,
-        token
-      );
-
-      if (memberId === user.id) {
-        setChats((prev) =>
-          prev.filter((chat) => chat._id !== selectedChat._id)
-        );
-        setSelectedChat(null);
-        setSettingsOpen(false);
-        return;
+  const openMedia = useCallback(
+    (message, source) => {
+      const list = (source || messagesRef.current).filter(isMediaMessage);
+      // Thread order is oldest-first; the shared-media grid is newest-first.
+      const ordered = source ? [...list].reverse() : list;
+      const index = ordered.findIndex((item) => item._id === message._id);
+      if (index !== -1) {
+        setLightbox({ items: ordered.map((item) => toLightboxItem(item, me)), index });
       }
+    },
+    [me],
+  );
 
-      syncUpdatedChat(response.data);
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Could not update members."
-      );
-    } finally {
-      setSaving(false);
+  const chatId = chat._id;
+  const bubbleActions = useMemo(
+    () => ({
+      onMenu: (message, point) => setMessageMenu({ message, point }),
+      onReply: (message) => {
+        setEditing(null);
+        setReplyTo(message);
+      },
+      onReactClick: (message, rect) => setReactionFor({ message, rect }),
+      onReact: reactTo,
+      onJump: (messageId) => jumpToMessage(chatId, messageId),
+      onRetry: retryMessage,
+      onDiscard: discardMessage,
+    }),
+    [
+      setEditing,
+      setReplyTo,
+      reactTo,
+      jumpToMessage,
+      chatId,
+      retryMessage,
+      discardMessage,
+    ],
+  );
+  const actions = useMemo(
+    () => ({ ...bubbleActions, onOpenMedia: (message) => openMedia(message) }),
+    [bubbleActions, openMedia],
+  );
+
+  const copyMessage = async (message) => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      toast("Message copied");
+    } catch {
+      toastError("Could not copy the message.");
     }
+  };
+
+  const messageMenuItems = (message) => {
+    const mine = senderId(message) === me;
+    const deleted = message.deletedForEveryone;
+    const isCall = message.messageType === "call";
+    const attachment = message.attachments?.[0];
+    const normal = !deleted && !isCall;
+
+    return [
+      normal && {
+        label: "Reply",
+        icon: FiCornerUpLeft,
+        onClick: () => bubbleActions.onReply(message),
+      },
+      normal && {
+        label: "React",
+        icon: FiSmile,
+        onClick: () => {
+          const { x, y } = messageMenu.point;
+          setReactionFor({ message, rect: { left: x, width: 0, top: y, bottom: y } });
+        },
+      },
+      normal && {
+        label: "Forward",
+        icon: FiCornerUpRight,
+        onClick: () => setDialog({ type: "forward", message }),
+      },
+      normal &&
+        message.content && {
+          label: "Copy text",
+          icon: FiCopy,
+          onClick: () => copyMessage(message),
+        },
+      normal &&
+        attachment?.url && {
+          label: "Download",
+          icon: FiDownload,
+          onClick: () => {
+            const link = document.createElement("a");
+            link.href = fileUrl(attachment.url, { download: true });
+            link.download = attachment.name;
+            link.click();
+          },
+        },
+      normal && {
+        label: message.starred ? "Unstar" : "Star",
+        icon: FiStar,
+        onClick: () => toggleStar(message),
+      },
+      normal &&
+        mine &&
+        message.messageType !== "voice" && {
+          label: "Edit",
+          icon: FiEdit2,
+          onClick: () => {
+            setReplyTo(null);
+            setEditing(message);
+          },
+        },
+      normal &&
+        mine && {
+          label: "Message info",
+          icon: FiInfo,
+          onClick: () => setDialog({ type: "info", message }),
+        },
+      {
+        label: "Delete",
+        icon: FiTrash2,
+        danger: true,
+        onClick: () => setDialog({ type: "delete", message }),
+      },
+    ];
+  };
+
+  /* ------------------------------ chat actions ---------------------------- */
+
+  const headerMenuItems = [
+    {
+      label: isGroup ? "Group info" : "Contact info",
+      icon: isGroup ? FiUsers : FiUser,
+      onClick: () => setSidePanel("info"),
+    },
+    { label: "Search messages", icon: FiSearch, onClick: () => setSidePanel("search") },
+    {
+      label: chat.muted ? "Unmute notifications" : "Mute notifications",
+      icon: chat.muted ? FiBell : FiBellOff,
+      onClick: () => setPrefs(chat._id, { muted: !chat.muted }),
+    },
+    { label: "Close chat", icon: FiXCircle, onClick: closeChat },
+    { divider: true, key: "divider" },
+    other && {
+      label: blockedByMe ? "Unblock" : "Block",
+      icon: FiSlash,
+      danger: true,
+      onClick: () =>
+        blockedByMe ? setBlocked(other._id, false) : askConfirm("block", chat),
+    },
+    {
+      label: "Clear chat",
+      icon: FiTrash2,
+      danger: true,
+      onClick: () => askConfirm("clear", chat),
+    },
+    {
+      label: isGroup ? "Exit group" : "Delete chat",
+      icon: isGroup ? FiLogOut : FiTrash2,
+      danger: true,
+      onClick: () => askConfirm("remove", chat),
+    },
+  ];
+
+  /* ------------------------------ drag & drop ----------------------------- */
+
+  const hasFiles = (event) => event.dataTransfer?.types?.includes("Files");
+  const dragHandlers = {
+    onDragEnter: (event) => {
+      if (!hasFiles(event)) return;
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    onDragLeave: (event) => {
+      if (!hasFiles(event)) return;
+      dragDepth.current -= 1;
+      if (dragDepth.current <= 0) setDragging(false);
+    },
+    onDragOver: (event) => {
+      if (hasFiles(event)) event.preventDefault();
+    },
+    onDrop: (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      inputRef.current?.addFiles(event.dataTransfer.files);
+    },
   };
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-slate-950">
-      <div className="flex min-h-16 items-center justify-between border-b border-gray-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-sm font-semibold text-gray-700 dark:bg-slate-700 dark:text-slate-200">
-            {isGroup ? (
-              <FiUsers />
-            ) : otherUser?.avatar ? (
-              <img
-                src={otherUser.avatar}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              getInitials(title) || "U"
-            )}
-          </div>
+    <div className="flex min-w-0 flex-1">
+      <div
+        className={`relative min-w-0 flex-1 flex-col ${sidePanel ? "hidden lg:flex" : "flex"}`}
+        {...dragHandlers}
+      >
+        <header className="flex h-16 shrink-0 items-center gap-1 border-b border-line bg-panel px-2">
+          <IconButton label="Back to chats" onClick={closeChat} className="md:hidden">
+            <FiArrowLeft />
+          </IconButton>
 
-          <div className="min-w-0 text-left">
-            <h2 className="truncate text-base font-semibold text-gray-950 dark:text-slate-100">
-              {title}
-            </h2>
-
-            <p className="truncate text-sm text-gray-500 dark:text-slate-400">
-              {isTyping ? "Typing..." : subtitle}
-            </p>
-          </div>
-        </div>
-
-        <div ref={menuRef} className="relative">
           <button
             type="button"
-            onClick={() => setMenuOpen((prev) => !prev)}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            title="Chat options"
-            aria-label="Chat options"
+            onClick={() => setSidePanel("info")}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1.5 py-1 text-left hover:bg-hover"
+            title={isGroup ? "Group info" : "Contact info"}
           >
-            <FiMoreVertical />
+            <Avatar
+              src={isGroup ? chat.avatar : other?.avatar}
+              name={title}
+              id={isGroup ? chat._id : other?._id}
+              group={isGroup}
+              size="sm"
+              online={!isGroup && onlineIds.has(other?._id)}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[15px] font-semibold text-ink">
+                {title}
+              </span>
+              <span
+                className={`block truncate text-xs ${
+                  typingIds.length > 0 ? "text-brand" : "text-muted"
+                }`}
+              >
+                {subtitle}
+              </span>
+            </span>
           </button>
 
-          {menuOpen && (
-            <div className="absolute right-0 top-12 z-40 w-56 overflow-hidden rounded-md border border-gray-200 bg-white py-2 text-sm text-gray-800 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 dark:hover:bg-slate-800"
-              >
-                {theme === "dark" ? <FiSun /> : <FiMoon />}
-                {theme === "dark" ? "Light mode" : "Dark mode"}
-              </button>
-
-              {isGroup && (
-                <button
-                  type="button"
-                  onClick={openGroupSettings}
-                  className="flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 dark:hover:bg-slate-800"
-                >
-                  <FiSettings />
-                  Group settings
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={handleClearChat}
-                disabled={saving}
-                className="flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 disabled:opacity-60 dark:hover:bg-slate-800"
-              >
-                <FiTrash2 />
-                Clear chat
-              </button>
-
-              {!isGroup && otherUser && (
-                <button
-                  type="button"
-                  onClick={handleBlockToggle}
-                  disabled={saving}
-                  className="flex h-10 w-full items-center gap-3 px-3 text-left text-red-600 hover:bg-red-50 disabled:opacity-60 dark:hover:bg-red-950/40"
-                >
-                  <FiSlash />
-                  {blockedByMe ? "Unblock" : "Block"}
-                </button>
-              )}
-            </div>
+          {canCall && (
+            <>
+              <IconButton label="Video call" onClick={() => startCall(chat, true)}>
+                <FiVideo />
+              </IconButton>
+              <IconButton label="Voice call" onClick={() => startCall(chat, false)}>
+                <FiPhone />
+              </IconButton>
+            </>
           )}
-        </div>
+          <IconButton
+            label="Search messages"
+            className="hidden sm:inline-flex"
+            onClick={() => setSidePanel("search")}
+          >
+            <FiSearch />
+          </IconButton>
+          <IconButton
+            label="Chat options"
+            onClick={(event) =>
+              setHeaderMenu(event.currentTarget.getBoundingClientRect())
+            }
+          >
+            <FiMoreVertical />
+          </IconButton>
+        </header>
+
+        <MessageList chat={chat} actions={actions} />
+        <MessageInput ref={inputRef} chat={chat} />
+
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-brand/90 text-white">
+            <FiUploadCloud className="text-5xl" />
+            <p className="text-lg font-medium">Drop files to attach them</p>
+          </div>
+        )}
       </div>
 
-      {error && (
-        <div className="border-b border-red-200 bg-red-50 px-4 py-2 text-left text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
-          {error}
-        </div>
+      {sidePanel && (
+        <aside className="flex w-full min-w-0 animate-fade-in flex-col border-l border-line bg-panel lg:w-[360px] lg:shrink-0">
+          {sidePanel === "info" ? (
+            <ChatInfoPanel
+              chat={chat}
+              onClose={() => setSidePanel(null)}
+              onSearch={() => setSidePanel("search")}
+              onOpenMedia={openMedia}
+            />
+          ) : (
+            <SearchPanel chat={chat} onClose={() => setSidePanel(null)} />
+          )}
+        </aside>
       )}
 
-      <MessageList />
-
-      <MessageInput />
-
-      {settingsOpen && isGroup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-5 text-left shadow-xl dark:bg-slate-900">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-950 dark:text-slate-100">
-                  Group settings
-                </h2>
-                <p className="text-sm text-gray-500 dark:text-slate-400">
-                  {selectedChat.users.length} members
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                title="Close"
-                aria-label="Close"
-              >
-                <FiX />
-              </button>
-            </div>
-
-            {error && (
-              <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
-                {error}
-              </div>
-            )}
-
-            {isAdmin && (
-              <div className="mb-5">
-                <label
-                  htmlFor="group-name"
-                  className="mb-1 block text-sm font-medium text-gray-700 dark:text-slate-300"
-                >
-                  Group name
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="group-name"
-                    type="text"
-                    value={groupName}
-                    onChange={(event) =>
-                      setGroupName(event.target.value)
-                    }
-                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleRename}
-                    disabled={saving}
-                    className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {isAdmin && (
-              <div className="mb-5">
-                <label
-                  htmlFor="member-search"
-                  className="mb-1 block text-sm font-medium text-gray-700 dark:text-slate-300"
-                >
-                  Add members
-                </label>
-                <input
-                  id="member-search"
-                  type="text"
-                  value={memberSearch}
-                  onChange={(event) =>
-                    handleSearchMembers(event.target.value)
-                  }
-                  placeholder="Search users..."
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                />
-
-                {memberResults.length > 0 && (
-                  <div className="mt-2 overflow-hidden rounded-md border border-gray-200 dark:border-slate-700">
-                    {memberResults.map((candidate) => (
-                      <button
-                        key={candidate._id}
-                        type="button"
-                        onClick={() => handleAddMember(candidate._id)}
-                        disabled={saving}
-                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-slate-800"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium text-gray-900 dark:text-slate-100">
-                            {candidate.name}
-                          </span>
-                          <span className="block truncate text-xs text-gray-500 dark:text-slate-400">
-                            {candidate.email}
-                          </span>
-                        </span>
-                        <FiPlus className="shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              {selectedChat.users.map((member) => {
-                const memberIsAdmin =
-                  selectedChat.groupAdmin?._id === member._id;
-                const canRemove =
-                  (isAdmin && member._id !== user.id) ||
-                  member._id === user.id;
-
-                return (
-                  <div
-                    key={member._id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2 dark:border-slate-700"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-950 dark:text-slate-100">
-                        {member.name}
-                        {member._id === user.id ? " (you)" : ""}
-                      </div>
-                      <div className="truncate text-xs text-gray-500 dark:text-slate-400">
-                        {memberIsAdmin ? "Admin" : member.email}
-                      </div>
-                    </div>
-
-                    {canRemove && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMember(member._id)}
-                        disabled={saving}
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-red-950/40"
-                        title={
-                          member._id === user.id
-                            ? "Leave group"
-                            : "Remove member"
-                        }
-                        aria-label={
-                          member._id === user.id
-                            ? "Leave group"
-                            : "Remove member"
-                        }
-                      >
-                        <FiUserMinus />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+      {headerMenu && (
+        <Menu
+          anchorRect={headerMenu}
+          items={headerMenuItems}
+          onClose={() => setHeaderMenu(null)}
+        />
       )}
+      {messageMenu && (
+        <Menu
+          point={messageMenu.point}
+          items={messageMenuItems(messageMenu.message)}
+          onClose={() => setMessageMenu(null)}
+        />
+      )}
+      {reactionFor && (
+        <ReactionPopover
+          rect={reactionFor.rect}
+          current={
+            reactionFor.message.reactions?.find((item) => String(item.user) === me)?.emoji
+          }
+          onPick={(emoji) => {
+            reactTo(reactionFor.message, emoji);
+            setReactionFor(null);
+          }}
+          onClose={() => setReactionFor(null)}
+        />
+      )}
+
+      {dialog?.type === "delete" && (
+        <DeleteMessageDialog
+          message={dialog.message}
+          me={me}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.type === "forward" && (
+        <ForwardDialog message={dialog.message} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.type === "info" && (
+        <MessageInfoDialog
+          message={dialog.message}
+          chat={chat}
+          me={me}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {lightbox && (
+        <Lightbox
+          items={lightbox.items}
+          startIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+      {confirmDialog}
     </div>
   );
 }

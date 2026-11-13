@@ -1,17 +1,20 @@
 const express = require("express");
-const router = express.Router();
-
 const protect = require("../middleware/authMiddleware");
 const {
   searchUsers,
   updateProfile,
   blockUser,
   unblockUser,
+  getBlockedUsers,
 } = require("../controllers/userController");
 
-router.get("/", protect, searchUsers);
-router.put("/profile", protect, updateProfile);
-router.put("/block", protect, blockUser);
-router.put("/unblock", protect, unblockUser);
+const router = express.Router();
+router.use(protect);
+
+router.get("/", searchUsers);
+router.get("/blocked", getBlockedUsers);
+router.put("/profile", updateProfile);
+router.put("/block", blockUser);
+router.put("/unblock", unblockUser);
 
 module.exports = router;

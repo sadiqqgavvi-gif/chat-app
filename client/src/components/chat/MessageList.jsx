@@ -1,691 +1,263 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  FiCheck,
-  FiCopy,
-  FiCornerUpLeft,
-  FiEdit3,
-  FiDownload,
-  FiTrash2,
-  FiX,
-} from "react-icons/fi";
-import {
-  fetchMessages,
-  markMessagesAsRead,
-  deleteMessageForMe,
-  deleteMessageForEveryone,
-  editMessage,
-} from "../../services/messageService";
-import { useChat } from "../../context/useChat";
-import { useAuth } from "../../context/useAuth";
-import socket from "../../socket";
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { FiChevronDown } from "react-icons/fi";
+import MessageBubble from "./MessageBubble";
+import Spinner from "../ui/Spinner";
+import { useChat } from "../../context/contexts";
+import { formatDay, isSameDay, receiptStatus, senderId } from "../../lib/format";
 
-const MENU_WIDTH = 220;
-const MENU_ITEM_HEIGHT = 40;
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+const NEAR_BOTTOM_PX = 120;
 
-function getSenderId(message) {
-  return message?.sender?._id || message?.sender;
+function DayDivider({ date }) {
+  return (
+    <div className="sticky top-2 z-10 my-3 flex justify-center">
+      <span className="rounded-lg bg-panel/95 px-3 py-1 text-xs font-medium text-muted shadow-sm">
+        {formatDay(date)}
+      </span>
+    </div>
+  );
 }
 
-function getChatId(message) {
-  return message?.chat?._id || message?.chat;
-}
+function MessageList({ chat, actions }) {
+  const { me, thread, loadOlder, jumpTarget, unreadMarker, typing } = useChat();
+  const { messages, loaded, loading, hasMore, loadingOlder } = thread;
 
-function getMessagePreview(message) {
-  if (!message) return "";
-  if (message.content) return message.content;
+  const scrollerRef = useRef(null);
+  const contentRef = useRef(null);
+  // Whether the view should follow new content to the bottom.
+  const stickRef = useRef(true);
+  const snapshot = useRef({ ready: false, firstId: null, lastId: null, height: 0 });
 
-  const attachment = message.attachments?.[0];
-  if (!attachment) return "Message";
-  if (attachment.mimeType?.startsWith("image/")) return "Photo";
-  if (attachment.mimeType?.startsWith("audio/")) return "Voice note";
+  const [showJumpDown, setShowJumpDown] = useState(false);
+  // Last message that was on screen when the user was at the bottom;
+  // anything after it is "new" while they are scrolled up.
+  const [seenUpToId, setSeenUpToId] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
 
-  return attachment.name || "Attachment";
-}
+  const typingIds = typing[chat._id];
+  const someoneTyping = typingIds?.length > 0;
 
-function MessageList() {
-  const { token, user } = useAuth();
-
-  const {
-    selectedChat,
-    messages,
-    setMessages,
-    setChats,
-    setReplyMessage,
-  } = useChat();
-
-  const bottomRef = useRef(null);
-  const joinedChatRef = useRef(null);
-  const editInputRef = useRef(null);
-
-  const [editingId, setEditingId] = useState(null);
-  const [editedText, setEditedText] = useState("");
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [actionError, setActionError] = useState("");
-  const [menu, setMenu] = useState({
-    visible: false,
-    x: 0,
-    y: 0,
-    message: null,
-  });
-
-  const selectedChatId = selectedChat?._id;
-
-  const updateMessage = useCallback((updatedMessage) => {
-    setMessages((prev) =>
-      prev.map((message) =>
-        message._id === updatedMessage._id
-          ? {
-              ...message,
-              ...updatedMessage,
-            }
-          : message
-      )
-    );
-
-    setChats((prevChats) =>
-      prevChats.map((chat) =>
-        chat.latestMessage?._id === updatedMessage._id
-          ? {
-              ...chat,
-              latestMessage: {
-                ...chat.latestMessage,
-                ...updatedMessage,
-              },
-            }
-          : chat
-      )
-    );
-  }, [setChats, setMessages]);
-
-  const closeMenu = () => {
-    setMenu((prev) => ({
-      ...prev,
-      visible: false,
-      message: null,
-    }));
-  };
-
-  const openMenu = (event, message) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const isOwnMessage = getSenderId(message) === user.id;
-    const menuItemsCount =
-      3 + (isOwnMessage && !message.deletedForEveryone ? 2 : 0);
-    const menuHeight = menuItemsCount * MENU_ITEM_HEIGHT + 16;
-    const maxX = window.innerWidth - MENU_WIDTH - 12;
-    const maxY = window.innerHeight - menuHeight - 12;
-
-    setActionError("");
-    setMenu({
-      visible: true,
-      x: Math.max(12, Math.min(event.clientX, maxX)),
-      y: Math.max(12, Math.min(event.clientY, maxY)),
-      message,
+  const scrollToBottom = useCallback((smooth = false) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    stickRef.current = true;
+    scroller.scrollTo({
+      top: scroller.scrollHeight,
+      behavior: smooth ? "smooth" : "auto",
     });
-  };
-
-  const beginEdit = (message) => {
-    setEditingId(message._id);
-    setEditedText(message.content || "");
-    closeMenu();
-  };
-
-  const beginReply = (message) => {
-    setReplyMessage(message);
-    closeMenu();
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditedText("");
-    setSavingEdit(false);
-    setActionError("");
-  };
-
-  const saveEdit = async () => {
-    const trimmedText = editedText.trim();
-
-    if (!editingId || savingEdit) return;
-
-    if (!trimmedText) {
-      setActionError("Message cannot be empty.");
-      return;
-    }
-
-    try {
-      setSavingEdit(true);
-      setActionError("");
-
-      const response = await editMessage(
-        editingId,
-        trimmedText,
-        token
-      );
-
-      updateMessage(response.data);
-      cancelEdit();
-    } catch (err) {
-      setActionError(
-        err.response?.data?.message ||
-          "Could not edit this message."
-      );
-    } finally {
-      setSavingEdit(false);
-    }
-  };
-
-  const handleDeleteForMe = async (messageId) => {
-    try {
-      setActionError("");
-      closeMenu();
-      await deleteMessageForMe(messageId, token);
-
-      setMessages((prev) =>
-        prev.filter((message) => message._id !== messageId)
-      );
-    } catch (err) {
-      setActionError(
-        err.response?.data?.message ||
-          "Could not delete this message."
-      );
-    }
-  };
-
-  const handleDeleteForEveryone = async (messageId) => {
-    try {
-      setActionError("");
-      closeMenu();
-      await deleteMessageForEveryone(messageId, token);
-    } catch (err) {
-      setActionError(
-        err.response?.data?.message ||
-          "Could not delete this message for everyone."
-      );
-    }
-  };
-
-  const copyMessage = async (message) => {
-    try {
-      setActionError("");
-      closeMenu();
-
-      if (!message.content || message.deletedForEveryone) return;
-
-      await navigator.clipboard.writeText(message.content);
-    } catch {
-      setActionError("Could not copy this message.");
-    }
-  };
-
-  const getMenuActions = () => {
-    const message = menu.message;
-    if (!message) return [];
-
-    const isOwnMessage = getSenderId(message) === user.id;
-    const canEdit =
-      isOwnMessage &&
-      !message.deletedForEveryone &&
-      (message.messageType || "text") === "text";
-
-    const actions = [];
-
-    if (!message.deletedForEveryone) {
-      actions.push({
-        label: "Reply",
-        icon: FiCornerUpLeft,
-        onClick: () => beginReply(message),
-      });
-
-      actions.push({
-        label: "Copy",
-        icon: FiCopy,
-        onClick: () => copyMessage(message),
-      });
-    }
-
-    if (canEdit) {
-      actions.push({
-        label: "Edit",
-        icon: FiEdit3,
-        onClick: () => beginEdit(message),
-      });
-    }
-
-    actions.push({
-      label: "Delete for me",
-      icon: FiTrash2,
-      onClick: () => handleDeleteForMe(message._id),
-    });
-
-    if (isOwnMessage && !message.deletedForEveryone) {
-      actions.push({
-        label: "Delete for everyone",
-        icon: FiTrash2,
-        danger: true,
-        onClick: () => handleDeleteForEveryone(message._id),
-      });
-    }
-
-    return actions;
-  };
-
-  useEffect(() => {
-    if (!selectedChatId) return;
-
-    if (joinedChatRef.current !== selectedChatId) {
-      socket.emit("join chat", selectedChatId);
-      joinedChatRef.current = selectedChatId;
-    }
-
-    const loadMessages = async () => {
-      try {
-        const response = await fetchMessages(selectedChatId, token);
-
-        setMessages(response.data);
-        await markMessagesAsRead(selectedChatId, token);
-        setChats((prevChats) =>
-          prevChats.map((chat) =>
-            chat._id === selectedChatId
-              ? {
-                  ...chat,
-                  unreadCount: 0,
-                  unreadCounts: {
-                    ...chat.unreadCounts,
-                    [user.id]: 0,
-                  },
-                }
-              : chat
-          )
-        );
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
-    loadMessages();
-
-    const handleMessageReceived = async (newMessage) => {
-      setChats((prevChats) => {
-        const updatedChats = prevChats.map((chat) =>
-          chat._id === getChatId(newMessage)
-            ? {
-                ...chat,
-                latestMessage: newMessage,
-              }
-            : chat
-        );
-
-        updatedChats.sort((a, b) => {
-          const aTime = a.latestMessage
-            ? new Date(a.latestMessage.createdAt)
-            : 0;
-          const bTime = b.latestMessage
-            ? new Date(b.latestMessage.createdAt)
-            : 0;
-
-          return bTime - aTime;
-        });
-
-        return updatedChats;
-      });
-
-      if (getChatId(newMessage) === selectedChatId) {
-        setMessages((prev) =>
-          prev.some((message) => message._id === newMessage._id)
-            ? prev
-            : [...prev, newMessage]
-        );
-
-        if (getSenderId(newMessage) !== user.id) {
-          socket.emit("message delivered", newMessage._id);
-          await markMessagesAsRead(selectedChatId, token);
-        }
-      }
-    };
-
-    const handleMessageDelivered = (messageId) => {
-      setMessages((prev) =>
-        prev.map((message) =>
-          message._id === messageId
-            ? {
-                ...message,
-                delivered: true,
-              }
-            : message
-        )
-      );
-    };
-
-    const handleMessagesRead = (payload) => {
-      const chatId =
-        typeof payload === "string" ? payload : payload.chatId;
-      const readerId =
-        typeof payload === "string" ? null : payload.readerId;
-
-      if (chatId !== selectedChatId || readerId === user.id) return;
-
-      setMessages((prev) =>
-        prev.map((message) =>
-          getSenderId(message) === user.id
-            ? {
-                ...message,
-                read: true,
-              }
-            : message
-        )
-      );
-    };
-
-    const handleMessageEdited = (updatedMessage) => {
-      updateMessage(updatedMessage);
-    };
-
-    const handleMessageDeleted = (messageId) => {
-      const deletedMessage = {
-        _id: messageId,
-        content: "This message was deleted",
-        deletedForEveryone: true,
-      };
-
-      updateMessage(deletedMessage);
-    };
-
-    socket.on("message received", handleMessageReceived);
-    socket.on("message delivered", handleMessageDelivered);
-    socket.on("messages read", handleMessagesRead);
-    socket.on("message edited", handleMessageEdited);
-    socket.on("message deleted", handleMessageDeleted);
-
-    return () => {
-      socket.off("message received", handleMessageReceived);
-      socket.off("message delivered", handleMessageDelivered);
-      socket.off("messages read", handleMessagesRead);
-      socket.off("message edited", handleMessageEdited);
-      socket.off("message deleted", handleMessageDeleted);
-
-      joinedChatRef.current = null;
-    };
-  }, [
-    selectedChatId,
-    token,
-    updateMessage,
-    user.id,
-    setChats,
-    setMessages,
-  ]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
-  }, [messages]);
-
-  useEffect(() => {
-    if (editingId) {
-      editInputRef.current?.focus();
-      editInputRef.current?.select();
-    }
-  }, [editingId]);
-
-  useEffect(() => {
-    const handleDismiss = () => closeMenu();
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        closeMenu();
-        cancelEdit();
-      }
-    };
-
-    window.addEventListener("mousedown", handleDismiss);
-    window.addEventListener("scroll", handleDismiss, true);
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("mousedown", handleDismiss);
-      window.removeEventListener("scroll", handleDismiss, true);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
   }, []);
 
-  if (!selectedChat) {
+  const firstUnreadId = useMemo(() => {
+    if (unreadMarker?.chatId !== chat._id) return null;
+    const since = new Date(unreadMarker.since).getTime();
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-900 text-gray-400 dark:bg-slate-950 dark:text-slate-500">
-        Select a chat to start messaging
-      </div>
+      messages.find(
+        (message) =>
+          senderId(message) !== me &&
+          message.messageType !== "system" &&
+          new Date(message.createdAt).getTime() > since,
+      )?._id || null
     );
-  }
+  }, [messages, unreadMarker, chat._id, me]);
+
+  // Keep the scroll position sensible whenever the list changes.
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || !loaded) return;
+
+    const previous = snapshot.current;
+    const firstId = messages[0]?._id || null;
+    const last = messages[messages.length - 1];
+    const lastId = last?._id || null;
+
+    if (!previous.ready) {
+      // First paint of this chat: start at the unread divider if there
+      // is one, otherwise at the newest message.
+      const divider = scroller.querySelector("[data-unread-divider]");
+      if (divider) {
+        stickRef.current = false;
+        divider.scrollIntoView({ block: "center" });
+      } else {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    } else if (firstId !== previous.firstId && lastId === previous.lastId) {
+      // Older messages were added above: stay on the same message.
+      scroller.scrollTop += scroller.scrollHeight - previous.height;
+    } else if (lastId !== previous.lastId && last) {
+      if (senderId(last) === me || stickRef.current) {
+        scrollToBottom(previous.ready && stickRef.current);
+      }
+    }
+
+    snapshot.current = { ready: true, firstId, lastId, height: scroller.scrollHeight };
+  }, [messages, loaded, me, scrollToBottom]);
+
+  // Images, reactions and the typing bubble change the height after
+  // render; keep following the bottom if that is where the user is.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content) return undefined;
+
+    const observer = new ResizeObserver(() => {
+      if (stickRef.current) scroller.scrollTop = scroller.scrollHeight;
+      snapshot.current.height = scroller.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [loaded]);
+
+  // If the first page does not fill the screen, fetch more right away.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (
+      loaded &&
+      hasMore &&
+      !loadingOlder &&
+      scroller.scrollHeight <= scroller.clientHeight + 200
+    ) {
+      loadOlder(chat._id);
+    }
+  }, [loaded, hasMore, loadingOlder, messages.length, chat._id, loadOlder]);
+
+  const handleScroll = () => {
+    const scroller = scrollerRef.current;
+    const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+
+    stickRef.current = distance < NEAR_BOTTOM_PX;
+    setShowJumpDown(distance > 400);
+    if (stickRef.current) setSeenUpToId(messages[messages.length - 1]?._id || null);
+    if (scroller.scrollTop < 400 && hasMore && !loadingOlder) loadOlder(chat._id);
+  };
+
+  // Scroll to and flash a specific message (reply quote, search, star).
+  useEffect(() => {
+    if (!jumpTarget || !loaded) return undefined;
+    const element = scrollerRef.current?.querySelector(
+      `[data-mid="${CSS.escape(jumpTarget.id)}"]`,
+    );
+    if (!element) return undefined;
+
+    stickRef.current = false;
+    element.scrollIntoView({ block: "center" });
+    setHighlightId(jumpTarget.id);
+    const timer = setTimeout(() => setHighlightId(null), 1700);
+    return () => clearTimeout(timer);
+  }, [jumpTarget, loaded]);
+
+  const seenIndex = messages.findIndex((message) => message._id === seenUpToId);
+  const newBelow =
+    showJumpDown && seenIndex !== -1
+      ? messages.slice(seenIndex + 1).filter((message) => senderId(message) !== me).length
+      : 0;
+
+  const rows = [];
+  messages.forEach((message, index) => {
+    const previous = messages[index - 1];
+    const newDay = !previous || !isSameDay(previous.createdAt, message.createdAt);
+
+    if (newDay)
+      rows.push(<DayDivider key={`day-${message._id}`} date={message.createdAt} />);
+    if (message._id === firstUnreadId) {
+      rows.push(
+        <div key="unread" data-unread-divider className="my-3 flex justify-center">
+          <span className="rounded-full bg-panel px-4 py-1 text-xs font-medium text-brand shadow-sm">
+            {unreadMarker.count} unread message{unreadMarker.count === 1 ? "" : "s"}
+          </span>
+        </div>,
+      );
+    }
+
+    const sameSender =
+      previous &&
+      !newDay &&
+      previous.messageType !== "system" &&
+      senderId(previous) === senderId(message);
+    const grouped =
+      sameSender &&
+      message._id !== firstUnreadId &&
+      new Date(message.createdAt) - new Date(previous.createdAt) < GROUP_WINDOW_MS;
+
+    rows.push(
+      <MessageBubble
+        key={message._id}
+        message={message}
+        me={me}
+        isGroup={chat.isGroupChat}
+        status={senderId(message) === me ? receiptStatus(message, chat, me) : null}
+        showName={!sameSender}
+        grouped={grouped}
+        highlighted={highlightId === message._id}
+        {...actions}
+      />,
+    );
+  });
 
   return (
-    <div className="relative flex-1 overflow-y-auto bg-gray-900 p-5 text-left dark:bg-slate-950">
-      {actionError && (
-        <div className="sticky top-0 z-20 mx-auto mb-4 max-w-md rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 shadow dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
-          {actionError}
-        </div>
-      )}
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={scrollerRef}
+        onScroll={handleScroll}
+        className="chat-wallpaper h-full overflow-y-auto overscroll-contain pb-3"
+      >
+        <div ref={contentRef}>
+          {loadingOlder && (
+            <div className="flex justify-center py-3 text-muted">
+              <Spinner className="h-4 w-4" />
+            </div>
+          )}
 
-      {messages.map((message) => {
-        const isOwnMessage = getSenderId(message) === user.id;
-        const isEditing = editingId === message._id;
-        const isDeleted = message.deletedForEveryone;
+          {!loaded && loading ? (
+            <div className="flex justify-center pt-16 text-muted">
+              <Spinner />
+            </div>
+          ) : loaded && messages.length === 0 ? (
+            <div className="flex justify-center px-6 pt-16">
+              <p className="rounded-xl bg-panel px-5 py-3 text-center text-sm text-muted shadow-sm">
+                No messages here yet. Say hello 👋
+              </p>
+            </div>
+          ) : (
+            rows
+          )}
 
-        return (
-          <div
-            key={message._id}
-            onContextMenu={(event) => openMenu(event, message)}
-            className={`mb-4 flex ${
-              isOwnMessage ? "justify-end" : "justify-start"
-            }`}
-          >
-            <div
-              className={`max-w-[min(24rem,80%)] rounded-2xl px-4 py-2 shadow-sm ${
-                isOwnMessage
-                  ? "rounded-br-md bg-blue-600 text-white"
-                  : "rounded-bl-md bg-gray-200 text-gray-950 dark:bg-slate-800 dark:text-slate-100"
-              }`}
-            >
-              {message.replyTo && !isDeleted && (
-                <div
-                  className={`mb-2 rounded-md border-l-4 px-3 py-2 text-xs ${
-                    isOwnMessage
-                      ? "border-white/70 bg-white/15 text-white"
-                      : "border-blue-500 bg-white/80 text-gray-700 dark:bg-slate-900 dark:text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold">
-                    {message.replyTo.sender?.name || "Replied message"}
-                  </div>
-                  <div className="truncate opacity-80">
-                    {getMessagePreview(message.replyTo)}
-                  </div>
-                </div>
-              )}
-
-              {isEditing ? (
-                <div className="min-w-64">
-                  <textarea
-                    ref={editInputRef}
-                    value={editedText}
-                    rows={2}
-                    onChange={(event) =>
-                      setEditedText(event.target.value)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        saveEdit();
-                      }
-
-                      if (event.key === "Escape") {
-                        cancelEdit();
-                      }
-                    }}
-                    className="w-full resize-none rounded-md border border-white/40 bg-white/10 px-3 py-2 text-sm text-inherit outline-none placeholder:text-white/70 focus:border-white"
-                  />
-
-                  <div className="mt-2 flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={cancelEdit}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 hover:bg-white/25"
-                      title="Cancel edit"
-                      aria-label="Cancel edit"
-                    >
-                      <FiX />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={saveEdit}
-                      disabled={savingEdit}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      title="Save edit"
-                      aria-label="Save edit"
-                    >
-                      <FiCheck />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {(isDeleted || message.content) && (
-                    <p
-                      className={`wrap-break-word text-sm leading-relaxed ${
-                        isDeleted ? "italic text-gray-400" : ""
-                      }`}
-                    >
-                      {isDeleted
-                        ? "This message was deleted"
-                        : message.content}
-                    </p>
-                  )}
-
-                  {!isDeleted &&
-                    message.attachments?.map((attachment, index) => (
-                      <div
-                        key={`${message._id}-${attachment.name}-${index}`}
-                        className={message.content ? "mt-2" : ""}
-                      >
-                        {attachment.mimeType?.startsWith("image/") ? (
-                          <a
-                            href={attachment.url}
-                            download={attachment.name}
-                            className="block overflow-hidden rounded-lg"
-                          >
-                            <img
-                              src={attachment.url}
-                              alt={attachment.name}
-                              className="max-h-72 w-full object-cover"
-                            />
-                          </a>
-                        ) : attachment.mimeType?.startsWith(
-                            "audio/"
-                          ) ? (
-                          <audio
-                            controls
-                            src={attachment.url}
-                            className="max-w-full"
-                          >
-                            <track kind="captions" />
-                          </audio>
-                        ) : (
-                          <a
-                            href={attachment.url}
-                            download={attachment.name}
-                            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
-                              isOwnMessage
-                                ? "bg-white/15 hover:bg-white/25"
-                                : "bg-white hover:bg-gray-50 dark:bg-slate-700 dark:hover:bg-slate-600"
-                            }`}
-                          >
-                            <FiDownload className="shrink-0" />
-                            <span className="truncate">
-                              {attachment.name}
-                            </span>
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                </>
-              )}
-
-              <div className="mt-1 flex items-center justify-end gap-1">
-                {message.edited && !isDeleted && (
-                  <span className="text-[10px] italic opacity-75">
-                    (edited)
-                  </span>
-                )}
-
-                <span className="text-[10px] opacity-80">
-                  {new Date(message.createdAt).toLocaleTimeString(
-                    [],
-                    {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    }
-                  )}
-                </span>
-
-                {isOwnMessage && !isDeleted && (
-                  <span
-                    className={`text-[11px] ${
-                      message.read
-                        ? "text-green-300"
-                        : "text-white/90"
-                    }`}
-                    title={
-                      message.read
-                        ? "Read"
-                        : message.delivered
-                        ? "Delivered"
-                        : "Sent"
-                    }
-                  >
-                    {message.read
-                      ? "\u2713\u2713"
-                      : message.delivered
-                      ? "\u2713\u2713"
-                      : "\u2713"}
-                  </span>
-                )}
+          {someoneTyping && (
+            <div className="mt-2.5 flex px-3 sm:px-[5%]">
+              <div
+                className="flex items-center gap-1 rounded-2xl rounded-tl-md bg-bubble-in px-3.5 py-3 shadow-sm"
+                aria-label="Typing"
+              >
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted" />
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted" />
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted" />
               </div>
             </div>
-          </div>
-        );
-      })}
-
-      {menu.visible && (
-        <div
-          className="fixed z-50 w-55 overflow-hidden rounded-md border border-gray-200 bg-white py-2 text-sm text-gray-800 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          style={{
-            left: menu.x,
-            top: menu.y,
-          }}
-          onMouseDown={(event) => event.stopPropagation()}
-          role="menu"
-        >
-          {getMenuActions().map((action) => {
-            const Icon = action.icon;
-
-            return (
-              <button
-                key={action.label}
-                type="button"
-                onClick={action.onClick}
-                className={`flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-gray-100 dark:hover:bg-slate-800 ${
-                  action.danger ? "text-red-600" : ""
-                }`}
-                role="menuitem"
-              >
-                <Icon className="shrink-0" />
-                <span className="truncate">{action.label}</span>
-              </button>
-            );
-          })}
+          )}
         </div>
-      )}
+      </div>
 
-      <div ref={bottomRef}></div>
+      {showJumpDown && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom(true)}
+          className="absolute bottom-4 right-4 flex h-10 w-10 animate-pop items-center justify-center rounded-full bg-panel text-xl text-muted shadow-lg hover:text-ink"
+          aria-label="Scroll to latest messages"
+        >
+          <FiChevronDown />
+          {newBelow > 0 && (
+            <span className="absolute -top-1.5 right-0 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-semibold text-white">
+              {newBelow}
+            </span>
+          )}
+        </button>
+      )}
     </div>
   );
 }

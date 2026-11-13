@@ -1,97 +1,105 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
+import { AuthLayout, Field, FormError } from "../components/AuthLayout";
+import { Button } from "../components/ui/Modal";
+import Spinner from "../components/ui/Spinner";
 import { registerUser } from "../services/authService";
+import { useAuth } from "../context/contexts";
+import { errorMessage } from "../lib/api";
 
 function Register() {
-  const navigate = useNavigate();
-
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
+  const { login } = useAuth();
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const set = (field) => (event) =>
+    setForm((current) => ({ ...current, [field]: event.target.value }));
+
+  const tooShort = form.password.length > 0 && form.password.length < 6;
+  const mismatch = form.confirm.length > 0 && form.confirm !== form.password;
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (form.password.length < 6 || form.confirm !== form.password) return;
+
+    setLoading(true);
+    setError("");
 
     try {
-      setLoading(true);
-
-      await registerUser({
-        name,
-        email,
-        password,
+      // Registering signs you in straight away.
+      const response = await registerUser({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        password: form.password,
       });
-
-      alert("Account created successfully!");
-
-      navigate("/login");
+      login(response.data.user, response.data.token);
     } catch (err) {
-      alert(
-        err.response?.data?.message ||
-          "Registration failed"
-      );
-    } finally {
+      setError(errorMessage(err, "Could not create your account."));
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex justify-center items-center h-screen bg-gray-100">
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white shadow-lg rounded-lg p-8 w-96"
-      >
-        <h2 className="text-3xl font-bold text-center mb-6">
-          Create Account
-        </h2>
-
-        <input
-          type="text"
-          placeholder="Name"
-          className="w-full border p-3 rounded mb-4"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-
-        <input
-          type="email"
-          placeholder="Email"
-          className="w-full border p-3 rounded mb-4"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-
-        <input
-          type="password"
-          placeholder="Password"
-          className="w-full border p-3 rounded mb-6"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-blue-600 text-white p-3 rounded hover:bg-blue-700"
-        >
-          {loading ? "Creating..." : "Register"}
-        </button>
-
-        <p className="text-center mt-5">
+    <AuthLayout
+      title="Create your account"
+      subtitle="Start chatting in less than a minute"
+      footer={
+        <>
           Already have an account?{" "}
-          <Link
-            to="/login"
-            className="text-blue-600 font-semibold"
-          >
-            Login
+          <Link to="/login" className="font-semibold text-brand hover:underline">
+            Sign in
           </Link>
-        </p>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        <FormError>{error}</FormError>
+        <Field
+          label="Name"
+          autoComplete="name"
+          placeholder="Your name"
+          maxLength={50}
+          value={form.name}
+          onChange={set("name")}
+          required
+          autoFocus
+        />
+        <Field
+          label="Email"
+          type="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+          value={form.email}
+          onChange={set("email")}
+          required
+        />
+        <Field
+          label="Password"
+          type="password"
+          autoComplete="new-password"
+          placeholder="At least 6 characters"
+          value={form.password}
+          onChange={set("password")}
+          error={tooShort ? "Use at least 6 characters." : ""}
+          required
+        />
+        <Field
+          label="Confirm password"
+          type="password"
+          autoComplete="new-password"
+          placeholder="Repeat your password"
+          value={form.confirm}
+          onChange={set("confirm")}
+          error={mismatch ? "Passwords don't match." : ""}
+          required
+        />
+        <Button type="submit" disabled={loading} className="mt-2 w-full py-2.5">
+          {loading && <Spinner className="h-4 w-4" />}
+          Create account
+        </Button>
       </form>
-    </div>
+    </AuthLayout>
   );
 }
 

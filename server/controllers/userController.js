@@ -1,168 +1,114 @@
 const User = require("../models/User");
+const Chat = require("../models/Chat");
+const { fail, requireId, escapeRegex, sameId } = require("../utils/http");
+const {
+  USER_FIELDS,
+  publicUser,
+  selfUser,
+  loadChat,
+  serializeChat,
+} = require("../utils/serialize");
+const { emitToUser, emitToUsers } = require("../utils/realtime");
+
+const MAX_AVATAR_LENGTH = 400_000;
+
+const isValidAvatar = (avatar) =>
+  avatar === "" ||
+  (typeof avatar === "string" &&
+    avatar.length <= MAX_AVATAR_LENGTH &&
+    /^data:image\/(png|jpeg|webp|gif);base64,/.test(avatar));
 
 const searchUsers = async (req, res) => {
-  try {
-    const keyword = req.query.search
-      ? {
-          $or: [
-            {
-              name: {
-                $regex: req.query.search,
-                $options: "i",
-              },
-            },
-            {
-              email: {
-                $regex: req.query.search,
-                $options: "i",
-              },
-            },
-          ],
-        }
-      : {};
+  const search =
+    typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const filter = { _id: { $ne: req.user._id } };
 
-    const users = await User.find(keyword)
-      .find({
-        _id: { $ne: req.user._id },
-      })
-      .select("-password");
-
-    res.json(users);
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Server Error",
-    });
+  if (search) {
+    const pattern = new RegExp(escapeRegex(search.slice(0, 60)), "i");
+    filter.$or = [{ name: pattern }, { email: pattern }];
   }
+
+  const users = await User.find(filter)
+    .select(USER_FIELDS)
+    .sort({ name: 1 })
+    .limit(30);
+
+  res.json(users.map(publicUser));
 };
 
 const updateProfile = async (req, res) => {
-  try {
-    const { name, avatar } = req.body;
+  const { name, about, avatar } = req.body;
+  const user = req.user;
 
-    if (!name?.trim()) {
-      return res.status(400).json({
-        message: "Name is required",
-      });
+  if (name !== undefined) {
+    if (typeof name !== "string" || !name.trim()) fail(400, "Name is required");
+    if (name.trim().length > 50) {
+      fail(400, "Name must be 50 characters or fewer");
     }
-
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
-    }
-
     user.name = name.trim();
-    user.avatar = avatar || "";
-
-    await user.save();
-
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      blockedUsers: user.blockedUsers,
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Server Error",
-    });
   }
+  if (about !== undefined) {
+    if (typeof about !== "string" || about.length > 140) {
+      fail(400, "About must be 140 characters or fewer");
+    }
+    user.about = about.trim();
+  }
+  if (avatar !== undefined) {
+    if (!isValidAvatar(avatar)) fail(400, "That image can't be used");
+    user.avatar = avatar;
+  }
+
+  await user.save();
+
+  // Let everyone who chats with this user see the new name/photo live.
+  const contacts = await Chat.distinct("users", { users: user._id });
+  emitToUsers(contacts, "user updated", publicUser(user));
+
+  res.json(selfUser(user));
 };
 
-const blockUser = async (req, res) => {
-  try {
-    const { userId } = req.body;
+const setBlocked = (blocked) => async (req, res) => {
+  const userId = requireId(req.body.userId, "user id");
+  if (sameId(userId, req.user._id)) fail(400, "You can't block yourself");
+  if (!(await User.exists({ _id: userId }))) fail(404, "User not found");
 
-    if (!userId || userId === req.user._id.toString()) {
-      return res.status(400).json({
-        message: "Valid user id is required",
-      });
-    }
+  const user = await User.findByIdAndUpdate(
+    req.user._id,
+    blocked
+      ? { $addToSet: { blockedUsers: userId } }
+      : { $pull: { blockedUsers: userId } },
+    { returnDocument: "after" }
+  );
 
-    const user = await User.findById(req.user._id);
-    const userToBlock = await User.findById(userId);
+  // Refresh the direct chat for both sides so the composer locks/unlocks.
+  const chat = await Chat.findOne({
+    isGroupChat: false,
+    users: { $all: [req.user._id, userId], $size: 2 },
+  }).select("_id");
 
-    if (!user || !userToBlock) {
-      return res.status(404).json({
-        message: "User not found",
-      });
-    }
-
-    if (
-      !user.blockedUsers.some(
-        (blockedId) => blockedId.toString() === userId
-      )
-    ) {
-      user.blockedUsers.push(userId);
-      await user.save();
-    }
-
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      blockedUsers: user.blockedUsers,
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Server Error",
+  if (chat) {
+    const full = await loadChat(chat._id);
+    [String(req.user._id), userId].forEach((id) => {
+      emitToUser(id, "chat updated", serializeChat(full, id));
     });
   }
+
+  res.json(selfUser(user));
 };
 
-const unblockUser = async (req, res) => {
-  try {
-    const { userId } = req.body;
+const getBlockedUsers = async (req, res) => {
+  const users = await User.find({ _id: { $in: req.user.blockedUsers } })
+    .select(USER_FIELDS)
+    .sort({ name: 1 });
 
-    if (!userId) {
-      return res.status(400).json({
-        message: "User id is required",
-      });
-    }
-
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
-    }
-
-    user.blockedUsers = user.blockedUsers.filter(
-      (blockedId) => blockedId.toString() !== userId
-    );
-
-    await user.save();
-
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      blockedUsers: user.blockedUsers,
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Server Error",
-    });
-  }
+  res.json(users.map(publicUser));
 };
 
 module.exports = {
   searchUsers,
   updateProfile,
-  blockUser,
-  unblockUser,
+  blockUser: setBlocked(true),
+  unblockUser: setBlocked(false),
+  getBlockedUsers,
+  isValidAvatar,
 };

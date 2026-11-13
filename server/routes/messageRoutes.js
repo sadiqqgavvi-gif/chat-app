@@ -1,38 +1,21 @@
 const express = require("express");
-const router = express.Router();
-
 const protect = require("../middleware/authMiddleware");
+const message = require("../controllers/messageController");
 
-const {
-  sendMessage,
-  getMessages,
-  markMessagesAsRead,
-  deleteMessageForMe,
-  deleteMessageForEveryone,
-  editMessage,
-  clearChat,
-} = require("../controllers/messageController");
+const router = express.Router();
+router.use(protect);
 
-router.post("/", protect, sendMessage);
+router.post("/", message.sendMessage);
+router.post("/forward", message.forwardMessages);
+router.get("/starred", message.getStarred);
 
-router.get("/:chatId", protect, getMessages);
+router.get("/chat/:chatId", message.getMessages);
+router.get("/chat/:chatId/search", message.searchMessages);
+router.get("/chat/:chatId/media", message.getMedia);
 
-router.put("/read", protect, markMessagesAsRead);
-
-router.put("/delete/:messageId", protect, deleteMessageForMe);
-
-router.put(
-  "/delete-everyone/:messageId",
-  protect,
-  deleteMessageForEveryone
-);
-
-router.put(
-  "/edit/:messageId",
-  protect,
-  editMessage
-);
-
-router.put("/clear/:chatId", protect, clearChat);
+router.put("/:messageId/edit", message.editMessage);
+router.put("/:messageId/react", message.reactToMessage);
+router.put("/:messageId/star", message.starMessage);
+router.delete("/:messageId", message.deleteMessage);
 
 module.exports = router;

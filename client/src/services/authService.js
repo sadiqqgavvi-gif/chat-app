@@ -1,17 +1,7 @@
-import api from "./api";
+import api from "../lib/api";
 
-export const registerUser = (userData) => {
-  return api.post("/auth/register", userData);
-};
-
-export const loginUser = (userData) => {
-  return api.post("/auth/login", userData);
-};
-
-export const getProfile = (token) => {
-  return api.get("/auth/profile", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-};
+export const registerUser = (data) => api.post("/auth/register", data);
+export const loginUser = (data) => api.post("/auth/login", data);
+export const fetchMe = () => api.get("/auth/me");
+export const changePassword = (currentPassword, newPassword) =>
+  api.put("/auth/password", { currentPassword, newPassword });

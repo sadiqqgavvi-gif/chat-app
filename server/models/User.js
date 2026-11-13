@@ -2,46 +2,26 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
-    },
-
+    name: { type: String, required: true, trim: true, maxlength: 50 },
     email: {
       type: String,
       required: true,
       unique: true,
+      trim: true,
+      lowercase: true,
     },
-
-    password: {
+    password: { type: String, required: true },
+    avatar: { type: String, default: "" },
+    about: {
       type: String,
-      required: true,
+      default: "Hey there! I am using Chat App.",
+      trim: true,
+      maxlength: 140,
     },
-
-    avatar: {
-      type: String,
-      default: "",
-    },
-
-    isOnline: {
-      type: Boolean,
-      default: false,
-    },
-
-    lastSeen: {
-      type: Date,
-    },
-
-    blockedUsers: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-    ],
+    lastSeen: { type: Date },
+    blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("User", userSchema);

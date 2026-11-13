@@ -1,11 +1,8 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Home from "./pages/Home";
-
-import ProtectedRoute from "./components/ProtectedRoute";
-import { useAuth } from "./context/useAuth";
+import { useAuth } from "./context/contexts";
 
 function App() {
   const { user } = useAuth();
@@ -14,50 +11,14 @@ function App() {
     <Routes>
       <Route
         path="/"
-        element={
-          user ? (
-            <Navigate to="/home" replace />
-          ) : (
-            <Navigate to="/login" replace />
-          )
-        }
+        element={user ? <Home key={user.id} /> : <Navigate to="/login" replace />}
       />
-
-      <Route
-        path="/login"
-        element={
-          user ? (
-            <Navigate to="/home" replace />
-          ) : (
-            <Login />
-          )
-        }
-      />
-
+      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route
         path="/register"
-        element={
-          user ? (
-            <Navigate to="/home" replace />
-          ) : (
-            <Register />
-          )
-        }
+        element={user ? <Navigate to="/" replace /> : <Register />}
       />
-
-      <Route
-        path="/home"
-        element={
-          <ProtectedRoute>
-            <Home />
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="*"
-        element={<Navigate to="/" replace />}
-      />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
